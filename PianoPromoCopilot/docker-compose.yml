@@ -1,0 +1,47 @@
+version: '3.9'
+
+services:
+  sqlserver:
+    image: mcr.microsoft.com/mssql/server:2022-latest
+    container_name: piano-promo-sqlserver
+    environment:
+      SA_PASSWORD: "PianoPromo@2024"
+      ACCEPT_EULA: "Y"
+      MSSQL_PID: "Express"
+    ports:
+      - "1433:1433"
+    volumes:
+      - sqlserver_data:/var/opt/mssql
+    healthcheck:
+      test: /opt/mssql-tools18/bin/sqlcmd -S localhost -U sa -P "PianoPromo@2024" -Q "SELECT 1" -No -C
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
+    networks:
+      - piano-promo-net
+
+  # Optional: Uncomment to also run the API in Docker
+  # api:
+  #   build:
+  #     context: .
+  #     dockerfile: src/PianoPromoCopilot.Api/Dockerfile
+  #   container_name: piano-promo-api
+  #   ports:
+  #     - "5000:5000"
+  #   environment:
+  #     - ConnectionStrings__DefaultConnection=Server=sqlserver,1433;Database=PianoPromoCopilot;User Id=sa;Password=PianoPromo@2024;TrustServerCertificate=True;
+  #     - Features__UseMockYouTube=true
+  #     - Features__EnableYouTubeWriteActions=false
+  #   depends_on:
+  #     sqlserver:
+  #       condition: service_healthy
+  #   networks:
+  #     - piano-promo-net
+
+volumes:
+  sqlserver_data:
+
+networks:
+  piano-promo-net:
+    driver: bridge
