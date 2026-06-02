@@ -15,11 +15,19 @@ public static class DependencyInjection
         IConfiguration configuration)
     {
         // Database
-        var connectionString = configuration.GetConnectionString("DefaultConnection")
-            ?? "Server=localhost,1433;Database=PianoPromoCopilot;User Id=sa;Password=PianoPromo@2024;TrustServerCertificate=True;";
-
-        services.AddDbContext<AppDbContext>(options =>
-            options.UseSqlServer(connectionString));
+        var useInMemory = configuration.GetValue<bool>("Features:UseInMemoryDatabase", false);
+        if (useInMemory)
+        {
+            services.AddDbContext<AppDbContext>(options =>
+                options.UseInMemoryDatabase("PianoPromoCopilot"));
+        }
+        else
+        {
+            var connectionString = configuration.GetConnectionString("DefaultConnection")
+                ?? "Server=localhost,1433;Database=PianoPromoCopilot;User Id=sa;Password=PianoPromo@2024;TrustServerCertificate=True;";
+            services.AddDbContext<AppDbContext>(options =>
+                options.UseSqlServer(connectionString));
+        }
 
         services.AddScoped<IAppDbContext>(provider =>
             provider.GetRequiredService<AppDbContext>());

@@ -10,7 +10,10 @@ public static class DbSeeder
     {
         try
         {
-            await context.Database.MigrateAsync();
+            if (context.Database.IsRelational())
+                await context.Database.MigrateAsync();
+            else
+                await context.Database.EnsureCreatedAsync();
 
             if (await context.YouTubeChannels.AnyAsync())
             {
