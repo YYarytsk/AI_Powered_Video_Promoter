@@ -153,7 +153,9 @@ public static class DbSeeder
                     SuggestionType = "Tags",
                     SuggestionText = "piano music, original piano, peaceful piano, relaxing music, piano composition, solo piano, acoustic piano, classical piano",
                     Platform = "YouTube",
-                    IsApproved = true,
+                    // Seeded suggestions start unreviewed: approval records a human decision,
+                    // so seeding one as approved would fabricate a review nobody made.
+                    IsApproved = false,
                     IsRejected = false,
                     CreatedAt = now
                 }

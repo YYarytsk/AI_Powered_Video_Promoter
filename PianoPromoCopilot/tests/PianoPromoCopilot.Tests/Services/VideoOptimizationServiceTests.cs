@@ -218,6 +218,176 @@ public class VideoOptimizationServiceTests
     }
 
     [Fact]
+    public async Task OptimizeAsync_RecordsComplianceReviewAuditEntry()
+    {
+        var llmMock = new Mock<ILlmService>();
+        llmMock.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""
+                {
+                  "titles": ["A peaceful piano piece"],
+                  "descriptions": ["An original composition"],
+                  "tags": ["piano"],
+                  "hashtags": ["#piano"],
+                  "thumbnailIdeas": ["Hands on keys"],
+                  "shortsIdeas": [],
+                  "socialPosts": { "instagram": "New piece out now" }
+                }
+                """);
+
+        var db = CreateInMemoryDbContext();
+        var sut = CreateService(llmMock.Object, db);
+
+        await sut.OptimizeAsync(new OptimizeVideoRequest { Title = "Test Piano Piece" });
+
+        var audit = db.ComplianceReviews.Single();
+        audit.SourceType.Should().Be("LlmSuggestion");
+        audit.RiskLevel.Should().Be("Low");
+        audit.Approved.Should().BeTrue();
+        audit.CreatedAt.Should().BeCloseTo(DateTime.UtcNow, TimeSpan.FromMinutes(1));
+    }
+
+    [Fact]
+    public async Task OptimizeAsync_BlockedContent_IsAuditedAndNotSaved()
+    {
+        var llmMock = new Mock<ILlmService>();
+        llmMock.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""
+                {
+                  "titles": ["Buy views for your piano channel"],
+                  "descriptions": ["D"],
+                  "tags": ["piano"],
+                  "hashtags": ["#piano"],
+                  "thumbnailIdeas": [],
+                  "shortsIdeas": [],
+                  "socialPosts": {}
+                }
+                """);
+
+        var db = CreateInMemoryDbContext();
+        db.YouTubeVideos.Add(new PianoPromoCopilot.Domain.Entities.YouTubeVideo
+        {
+            YouTubeVideoId = "test_blocked_001",
+            Title = "Test Video",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var sut = CreateService(llmMock.Object, db);
+
+        var result = await sut.OptimizeAsync(new OptimizeVideoRequest
+        {
+            YouTubeVideoId = "test_blocked_001",
+            Title = "Test Piano Piece"
+        });
+
+        // The verdict reaches the caller...
+        result.Compliance.RiskLevel.Should().Be("Blocked");
+        result.Compliance.IsSafeToUse.Should().BeFalse();
+
+        // ...the refusal is auditable...
+        var audit = db.ComplianceReviews.Single();
+        audit.RiskLevel.Should().Be("Blocked");
+        audit.Approved.Should().BeFalse();
+        audit.Issues.Should().NotBeNullOrEmpty();
+
+        // ...and nothing violating was persisted for a human to approve.
+        db.VideoOptimizationSuggestions
+            .Count(s => s.YouTubeVideoId == "test_blocked_001")
+            .Should().Be(0);
+    }
+
+    [Fact]
+    public async Task OptimizeAsync_CalledTwice_DoesNotDuplicateSuggestions()
+    {
+        var llmMock = new Mock<ILlmService>();
+        llmMock.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""
+                {
+                  "titles": ["Title A", "Title B"],
+                  "descriptions": ["Desc"],
+                  "tags": ["piano"],
+                  "hashtags": ["#piano"],
+                  "thumbnailIdeas": ["Idea"],
+                  "shortsIdeas": [],
+                  "socialPosts": { "instagram": "Post" }
+                }
+                """);
+
+        var db = CreateInMemoryDbContext();
+        db.YouTubeVideos.Add(new PianoPromoCopilot.Domain.Entities.YouTubeVideo
+        {
+            YouTubeVideoId = "test_dedupe_001",
+            Title = "Test Video",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var sut = CreateService(llmMock.Object, db);
+        var request = new OptimizeVideoRequest
+        {
+            YouTubeVideoId = "test_dedupe_001",
+            Title = "Test Piano Piece"
+        };
+
+        await sut.OptimizeAsync(request);
+        var afterFirst = db.VideoOptimizationSuggestions.Count(s => s.YouTubeVideoId == "test_dedupe_001");
+
+        await sut.OptimizeAsync(request);
+        var afterSecond = db.VideoOptimizationSuggestions.Count(s => s.YouTubeVideoId == "test_dedupe_001");
+
+        afterFirst.Should().BeGreaterThan(0);
+        afterSecond.Should().Be(afterFirst, "re-optimizing must not duplicate identical suggestions");
+    }
+
+    [Fact]
+    public async Task OptimizeAsync_ReOptimize_PreservesApprovalDecisions()
+    {
+        var llmMock = new Mock<ILlmService>();
+        llmMock.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""
+                {
+                  "titles": ["Title A"],
+                  "descriptions": ["Desc"],
+                  "tags": ["piano"],
+                  "hashtags": ["#piano"],
+                  "thumbnailIdeas": [],
+                  "shortsIdeas": [],
+                  "socialPosts": {}
+                }
+                """);
+
+        var db = CreateInMemoryDbContext();
+        db.YouTubeVideos.Add(new PianoPromoCopilot.Domain.Entities.YouTubeVideo
+        {
+            YouTubeVideoId = "test_preserve_001",
+            Title = "Test Video",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var sut = CreateService(llmMock.Object, db);
+        var request = new OptimizeVideoRequest
+        {
+            YouTubeVideoId = "test_preserve_001",
+            Title = "Test Piano Piece"
+        };
+
+        await sut.OptimizeAsync(request);
+
+        // A human approves one suggestion...
+        var approved = db.VideoOptimizationSuggestions.First(s => s.YouTubeVideoId == "test_preserve_001");
+        approved.IsApproved = true;
+        await db.SaveChangesAsync();
+
+        // ...and re-optimizing must not silently discard that decision.
+        await sut.OptimizeAsync(request);
+
+        db.VideoOptimizationSuggestions
+            .Single(s => s.Id == approved.Id)
+            .IsApproved.Should().BeTrue();
+    }
+
+    [Fact]
     public async Task OptimizeAsync_StoresShortsIdeaAsCamelCaseJson()
     {
         // The saved ShortsIdea payload is JSON that clients parse directly, so its

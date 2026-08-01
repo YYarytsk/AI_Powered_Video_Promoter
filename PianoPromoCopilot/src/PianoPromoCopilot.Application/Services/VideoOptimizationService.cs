@@ -127,6 +127,9 @@ public class VideoOptimizationService : IVideoOptimizationService
 
         response.Compliance = _complianceService.ReviewAll(allTexts.Where(t => !string.IsNullOrEmpty(t)));
 
+        // Record the verdict before acting on it, so refusals are auditable after the fact.
+        await RecordComplianceReviewAsync(response.Compliance, cancellationToken);
+
         // Blocked content is never usable, so it must not be persisted or become approvable.
         // The response still carries the verdict so the UI can explain why nothing was saved.
         if (response.Compliance.RiskLevel == RiskLevel.Blocked)
@@ -146,6 +149,34 @@ public class VideoOptimizationService : IVideoOptimizationService
         }
 
         return response;
+    }
+
+    /// <summary>
+    /// Writes an audit row for a compliance verdict. Approved reflects whether the content was
+    /// allowed to proceed, not whether a human signed off on it - that stays on the suggestion.
+    /// Auditing must never break the request it is recording, so failures are logged and swallowed.
+    /// </summary>
+    private async Task RecordComplianceReviewAsync(
+        ComplianceSummaryDto compliance,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await _dbContext.ComplianceReviews.AddAsync(new ComplianceReview
+            {
+                SourceType = ComplianceSourceType.LlmSuggestion,
+                RiskLevel = compliance.RiskLevel,
+                Issues = compliance.Issues.Length > 0 ? string.Join("; ", compliance.Issues) : null,
+                Approved = compliance.RiskLevel != RiskLevel.Blocked,
+                CreatedAt = DateTime.UtcNow
+            }, cancellationToken);
+
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to record compliance review audit entry");
+        }
     }
 
     private static string BuildUserPrompt(OptimizeVideoRequest request)

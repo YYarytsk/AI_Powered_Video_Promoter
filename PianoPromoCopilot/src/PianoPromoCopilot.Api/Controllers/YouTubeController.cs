@@ -4,6 +4,7 @@ using Microsoft.Extensions.Configuration;
 using PianoPromoCopilot.Application.DTOs;
 using PianoPromoCopilot.Application.Interfaces;
 using PianoPromoCopilot.Domain.Entities;
+using PianoPromoCopilot.Domain.Enums;
 
 namespace PianoPromoCopilot.Api.Controllers;
 
@@ -199,8 +200,25 @@ public class YouTubeController : ControllerBase
         if (textsToReview.Count > 0)
         {
             var compliance = _complianceService.ReviewAll(textsToReview);
+
+            // This is the only path that touches a live YouTube video, so the verdict is
+            // recorded either way - a refusal is exactly what an audit needs to show.
+            await _dbContext.ComplianceReviews.AddAsync(new ComplianceReview
+            {
+                SourceType = ComplianceSourceType.MetadataUpdate,
+                RiskLevel = compliance.RiskLevel,
+                Issues = compliance.Issues.Length > 0 ? string.Join("; ", compliance.Issues) : null,
+                Approved = compliance.IsSafeToUse,
+                CreatedAt = DateTime.UtcNow
+            }, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+
             if (!compliance.IsSafeToUse)
             {
+                _logger.LogWarning(
+                    "Compliance blocked a YouTube metadata update for {VideoId}. Risk: {Risk}",
+                    youtubeVideoId, compliance.RiskLevel);
+
                 return BadRequest(new
                 {
                     message = "Compliance review failed. Update blocked.",
