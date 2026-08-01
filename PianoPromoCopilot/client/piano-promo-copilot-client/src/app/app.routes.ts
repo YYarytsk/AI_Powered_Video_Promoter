@@ -19,6 +19,10 @@ export const routes: Routes = [
     loadComponent: () => import('./components/optimize-video/optimize-video.component').then(m => m.OptimizeVideoComponent)
   },
   {
+    path: 'videos/:id/suggestions',
+    loadComponent: () => import('./components/suggestions/suggestions.component').then(m => m.SuggestionsComponent)
+  },
+  {
     path: 'videos/:id/promotions',
     loadComponent: () => import('./components/promotion-drafts/promotion-drafts.component').then(m => m.PromotionDraftsComponent)
   },

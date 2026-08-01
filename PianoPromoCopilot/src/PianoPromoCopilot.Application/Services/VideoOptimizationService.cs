@@ -15,6 +15,13 @@ public class VideoOptimizationService : IVideoOptimizationService
     private readonly IAppDbContext _dbContext;
     private readonly ILogger<VideoOptimizationService> _logger;
 
+    // Structured suggestion payloads (e.g. Shorts ideas) are stored as JSON in SuggestionText.
+    // Use camelCase so the stored shape matches the casing the API returns everywhere else.
+    private static readonly JsonSerializerOptions StoredJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase
+    };
+
     private const string SystemPrompt = """
         You are a YouTube growth strategist for an independent pianist who publishes original piano compositions.
 
@@ -347,7 +354,7 @@ public class VideoOptimizationService : IVideoOptimizationService
             {
                 YouTubeVideoId = youtubeVideoId,
                 SuggestionType = SuggestionType.ShortsIdea,
-                SuggestionText = System.Text.Json.JsonSerializer.Serialize(shorts),
+                SuggestionText = JsonSerializer.Serialize(shorts, StoredJsonOptions),
                 Platform = "YouTube",
                 CreatedAt = now
             });

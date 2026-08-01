@@ -91,14 +91,10 @@ For full macOS setup details, see [docs/setup-mac.md](docs/setup-mac.md).
 
 ## Quick Start
 
-### 1. Start SQL Server
+**No Docker, no database, and no API keys are required.** In `Development` the app runs
+against an in-memory database seeded with sample piano videos.
 
-```bash
-docker-compose up -d sqlserver
-# Wait ~30 seconds for SQL Server to initialize
-```
-
-### 2. Run the Backend
+### 1. Run the Backend
 
 ```bash
 cd src/PianoPromoCopilot.Api
@@ -108,39 +104,85 @@ dotnet run
 Backend: http://localhost:5000  
 Swagger: http://localhost:5000/swagger
 
-### 3. Run the Frontend
+### 2. Run the Frontend
+
+In a second terminal:
 
 ```bash
 cd client/piano-promo-copilot-client
 npm install
-ng serve
+npm start          # or: ng serve
 ```
 
 Frontend: http://localhost:4200
 
-### 4. Apply Migrations (if needed)
+Open http://localhost:4200 and you'll see three seeded piano videos ready to work with.
 
-```bash
-dotnet tool install --global dotnet-ef
-dotnet ef database update \
-  --project src/PianoPromoCopilot.Infrastructure \
-  --startup-project src/PianoPromoCopilot.Api
-```
+---
+
+## The Core Workflow
+
+1. **Videos** — see your videos (seeded samples in mock mode)
+2. **Optimize** — generate titles, descriptions, tags, thumbnails, Shorts ideas and social posts
+3. **Review Suggestions** — approve or reject each generated suggestion individually
+4. **Promote** — generate per-platform promotion drafts, edit them, approve them
+5. **Mark Posted** — after *you* manually post, mark the draft as posted
+
+Nothing is ever published automatically. Approving only records your review.
 
 ---
 
 ## Mock Mode (No API Keys Required)
 
-The app works fully in mock mode:
+The app works fully in mock mode — this is the default in `Development`:
 
 | Feature | Mock Behavior |
 |---------|--------------|
+| Database | EF Core in-memory, seeded on startup (no Docker/SQL Server) |
 | YouTube data | 3 sample piano videos with realistic metadata |
-| LLM/AI | Deterministic high-quality templates |
+| LLM/AI | Deterministic high-quality templates (no OpenAI key) |
 | Analytics | Seeded 8-day history per video |
-| Optimization | Full response without OpenAI key |
+| Optimization | Full response, compliance-checked |
 
-To run in mock mode, no configuration changes are needed. It's the default.
+Controlled by `src/PianoPromoCopilot.Api/appsettings.Development.json`:
+
+```json
+"Features": {
+  "UseMockYouTube": true,
+  "EnableYouTubeWriteActions": false,
+  "UseMockAnalytics": true,
+  "UseInMemoryDatabase": true
+}
+```
+
+> In-memory data resets every time the API restarts. To keep data between runs, use
+> SQL Server (below).
+
+---
+
+## Optional: Run Against SQL Server
+
+```bash
+# 1. Start SQL Server (wait ~30s for it to initialize)
+docker-compose up -d sqlserver
+docker-compose ps        # sqlserver should be "healthy"
+
+# 2. Turn off the in-memory database
+#    In appsettings.Development.json set:  "UseInMemoryDatabase": false
+
+# 3. Run the API — it migrates and seeds automatically on startup
+cd src/PianoPromoCopilot.Api && dotnet run
+```
+
+To apply migrations manually instead:
+
+```bash
+dotnet tool install --global dotnet-ef
+export PATH=$PATH:$HOME/.dotnet/tools
+dotnet ef database update \
+  --project src/PianoPromoCopilot.Infrastructure \
+  --startup-project src/PianoPromoCopilot.Api
+```
 
 ---
 

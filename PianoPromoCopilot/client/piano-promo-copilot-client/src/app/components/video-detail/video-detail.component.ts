@@ -19,6 +19,7 @@ import { VideoService, VideoDto } from '../../services/video.service';
         </div>
         <div style="display:flex;gap:0.75rem;flex-wrap:wrap;">
           <a [routerLink]="['/videos', video.youTubeVideoId, 'optimize']" class="btn btn-primary">🤖 Optimize</a>
+          <a [routerLink]="['/videos', video.youTubeVideoId, 'suggestions']" class="btn btn-secondary">✅ Suggestions</a>
           <a [routerLink]="['/videos', video.youTubeVideoId, 'promotions']" class="btn btn-secondary">📢 Promote</a>
           <a [routerLink]="['/videos', video.youTubeVideoId, 'analytics']" class="btn btn-secondary">📊 Analytics</a>
         </div>

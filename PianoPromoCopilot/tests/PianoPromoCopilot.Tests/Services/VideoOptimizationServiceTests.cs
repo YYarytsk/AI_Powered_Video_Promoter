@@ -216,4 +216,73 @@ public class VideoOptimizationServiceTests
         savedSuggestions.Should().Contain(s => s.SuggestionType == "Title");
         savedSuggestions.Should().Contain(s => s.SuggestionType == "Tags");
     }
+
+    [Fact]
+    public async Task OptimizeAsync_StoresShortsIdeaAsCamelCaseJson()
+    {
+        // The saved ShortsIdea payload is JSON that clients parse directly, so its
+        // casing must match the camelCase the rest of the API returns.
+        var llmMock = new Mock<ILlmService>();
+        llmMock.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync("""
+                {
+                  "titles": ["T"],
+                  "descriptions": ["D"],
+                  "tags": ["piano"],
+                  "hashtags": ["#piano"],
+                  "thumbnailIdeas": ["Idea"],
+                  "shortsIdeas": [
+                    {
+                      "title": "Shorts Title",
+                      "hook": "Watch this!",
+                      "suggestedTimestamp": "1:30",
+                      "description": "Shorts description",
+                      "caption": "Caption"
+                    }
+                  ],
+                  "socialPosts": { "instagram": "Post" }
+                }
+                """);
+
+        var db = CreateInMemoryDbContext();
+        db.YouTubeVideos.Add(new PianoPromoCopilot.Domain.Entities.YouTubeVideo
+        {
+            YouTubeVideoId = "test_shorts_001",
+            Title = "Test Video",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var sut = CreateService(llmMock.Object, db);
+
+        // Act
+        await sut.OptimizeAsync(new OptimizeVideoRequest
+        {
+            YouTubeVideoId = "test_shorts_001",
+            Title = "Test Piano Piece"
+        });
+
+        // Assert
+        var shorts = db.VideoOptimizationSuggestions
+            .Single(s => s.YouTubeVideoId == "test_shorts_001" && s.SuggestionType == "ShortsIdea");
+
+        shorts.SuggestionText.Should().Contain("\"title\":");
+        shorts.SuggestionText.Should().Contain("\"suggestedTimestamp\":");
+        shorts.SuggestionText.Should().NotContain("\"Title\":");
+        shorts.SuggestionText.Should().NotContain("\"SuggestedTimestamp\":");
+
+        // And it must round-trip into the same DTO the API exposes, under the same
+        // camelCase policy the API uses — no case-insensitive fallback needed.
+        var parsed = System.Text.Json.JsonSerializer.Deserialize<ShortsIdeaDto>(
+            shorts.SuggestionText,
+            new System.Text.Json.JsonSerializerOptions
+            {
+                PropertyNamingPolicy = System.Text.Json.JsonNamingPolicy.CamelCase,
+                PropertyNameCaseInsensitive = false
+            });
+
+        parsed.Should().NotBeNull();
+        parsed!.Title.Should().Be("Shorts Title");
+        parsed.SuggestedTimestamp.Should().Be("1:30");
+    }
 }

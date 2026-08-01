@@ -89,6 +89,7 @@ import { FormsModule } from '@angular/forms';
                 <div style="display:flex;gap:0.5rem;flex-wrap:wrap;">
                   <a [routerLink]="['/videos', video.youTubeVideoId]" class="btn btn-secondary btn-sm">View</a>
                   <a [routerLink]="['/videos', video.youTubeVideoId, 'optimize']" class="btn btn-primary btn-sm">Optimize</a>
+                  <a [routerLink]="['/videos', video.youTubeVideoId, 'suggestions']" class="btn btn-secondary btn-sm">Suggestions</a>
                   <a [routerLink]="['/videos', video.youTubeVideoId, 'promotions']" class="btn btn-secondary btn-sm">Promote</a>
                   <a [routerLink]="['/videos', video.youTubeVideoId, 'analytics']" class="btn btn-secondary btn-sm">Analytics</a>
                 </div>

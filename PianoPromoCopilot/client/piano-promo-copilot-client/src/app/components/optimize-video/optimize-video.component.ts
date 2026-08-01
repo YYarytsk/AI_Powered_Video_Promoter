@@ -93,6 +93,18 @@ import { VideoService } from '../../services/video.service';
             <div *ngIf="result.compliance.isSafeToUse" style="color:#155724;">✅ Safe to use after human review</div>
           </div>
 
+          <!-- Saved-to-review CTA: suggestions are persisted only when a video id is present -->
+          <div class="card" style="margin-bottom:1rem;display:flex;justify-content:space-between;align-items:center;gap:1rem;flex-wrap:wrap;"
+               *ngIf="savedToVideo">
+            <div>
+              <strong>💾 Saved for review</strong>
+              <div style="color:#666;font-size:0.85rem;">
+                These suggestions were saved. Approve or reject each one before you use it.
+              </div>
+            </div>
+            <a [routerLink]="['/videos', videoId, 'suggestions']" class="btn btn-primary">✅ Review Suggestions</a>
+          </div>
+
           <!-- Titles -->
           <div class="card" style="margin-bottom:1rem;">
             <h3 style="margin-bottom:0.75rem;">📝 Titles</h3>
@@ -182,6 +194,7 @@ export class OptimizeVideoComponent implements OnInit {
   result: OptimizeVideoResponse | null = null;
   loading = false;
   error = '';
+  savedToVideo = false;
 
   get socialPostsArray() {
     if (!this.result) return [];
@@ -227,12 +240,24 @@ export class OptimizeVideoComponent implements OnInit {
     this.result = null;
 
     this.optimizationService.optimize(this.request).subscribe({
-      next: res => { this.result = res; this.loading = false; },
-      error: err => { this.error = err.message; this.loading = false; }
+      next: res => {
+        this.result = res;
+        this.savedToVideo = !!this.request.youTubeVideoId;
+        this.loading = false;
+      },
+      error: err => { this.error = this.friendlyError(err); this.loading = false; }
     });
   }
 
   copy(text: string): void {
     navigator.clipboard.writeText(text).catch(() => {});
+  }
+
+  private friendlyError(err: unknown): string {
+    const e = err as { status?: number; error?: { message?: string }; message?: string };
+    if (e?.error?.message) return e.error.message;
+    if (e?.status === 0) return 'Cannot reach the API. Is the backend running on http://localhost:5000?';
+    if (e?.status) return `Request failed (HTTP ${e.status}).`;
+    return e?.message || 'Something went wrong.';
   }
 }
