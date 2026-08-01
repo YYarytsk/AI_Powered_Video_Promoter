@@ -16,32 +16,36 @@ import { YouTubeService, YouTubeChannelDto } from '../../services/youtube.servic
       </div>
     </div>
 
-    <div class="compliance-notice card" style="margin-bottom:1.5rem; border-left: 4px solid #6c63ff;">
-      <strong>✅ Compliance First</strong>
-      <p style="margin-top:0.5rem; color:#666; font-size:0.9rem;">
-        All suggestions require human review. No fake views, bots, or spam automation.
-        This tool assists with organic discovery, metadata quality, and legitimate promotion only.
-      </p>
+    <div class="notice">
+      <span class="notice-icon" aria-hidden="true">🛡️</span>
+      <div>
+        <div class="notice-title">Compliance first</div>
+        <p class="notice-body">
+          Every suggestion is reviewed by you before it goes anywhere. No fake views, no bots, no spam
+          automation — this tool helps with organic discovery, metadata quality and honest promotion only.
+        </p>
+      </div>
     </div>
 
     <!-- Channel Card -->
-    <div class="card" style="margin-bottom:1.5rem;">
-      <h3 style="margin-bottom:1rem;">📺 Channel Status</h3>
-      <div *ngIf="channel">
-        <div style="display:flex;align-items:center;gap:1rem;">
-          <img *ngIf="channel.thumbnailUrl" [src]="channel.thumbnailUrl" alt="Channel thumbnail"
-               style="width:56px;height:56px;border-radius:50%;object-fit:cover;">
-          <div>
-            <div style="font-weight:600;font-size:1.1rem;">{{channel.channelTitle}}</div>
-            <div style="font-size:0.85rem; color:#888;">ID: {{channel.channelId}}</div>
-            <span class="badge" [class.badge-approved]="channel.isConnected" [class.badge-draft]="!channel.isConnected">
-              {{channel.isConnected ? '✓ Connected' : '⚡ Mock Mode'}}
-            </span>
-          </div>
+    <div class="card channel-card">
+      <h2 class="card-title">📺 Channel status</h2>
+      <div *ngIf="channel" class="channel-row">
+        <img *ngIf="channel.thumbnailUrl" [src]="channel.thumbnailUrl"
+             [alt]="channel.channelTitle + ' channel avatar'" class="channel-avatar">
+        <div>
+          <div class="channel-name">{{channel.channelTitle}}</div>
+          <div class="text-meta">ID: {{channel.channelId}}</div>
+          <span class="badge" [ngClass]="channel.isConnected ? 'badge-approved' : 'badge-draft'">
+            {{channel.isConnected ? '✓ Connected' : '⚡ Mock mode'}}
+          </span>
         </div>
       </div>
-      <div *ngIf="channelError" class="error-banner">{{channelError}}</div>
-      <div *ngIf="!channel && !channelError" class="loading">Loading channel...</div>
+      <div *ngIf="channelError" class="error-banner channel-error" role="alert">
+        <span>{{channelError}}</span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="loadChannel()">Retry</button>
+      </div>
+      <div *ngIf="!channel && !channelError" class="loading loading-inline" role="status">Loading channel…</div>
     </div>
 
     <!-- Stats -->
@@ -65,35 +69,39 @@ import { YouTubeService, YouTubeChannelDto } from '../../services/youtube.servic
     </div>
 
     <!-- Recent Videos -->
-    <div class="card" style="margin-bottom:1.5rem;">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:1rem;">
-        <h3>🎵 Recent Videos</h3>
-        <a routerLink="/videos" class="btn btn-secondary btn-sm">View All</a>
+    <div class="card recent-card">
+      <div class="section-head">
+        <h2 class="card-title">🎵 Recent videos</h2>
+        <a routerLink="/videos" class="btn btn-secondary btn-sm">View all</a>
       </div>
 
-      <div *ngIf="loading" class="loading">Loading videos...</div>
-      <div *ngIf="error" class="error-banner">{{error}}</div>
+      <div *ngIf="loading" class="loading loading-inline" role="status">Loading videos…</div>
+      <div *ngIf="error" class="error-banner" role="alert">
+        <span>{{error}}</span>
+        <button type="button" class="btn btn-secondary btn-sm" (click)="loadVideos()">Retry</button>
+      </div>
 
       <div *ngIf="!loading && !error">
         <div *ngIf="videos.length === 0" class="empty-state">
-          <div class="empty-icon">🎹</div>
-          <p>No videos yet. Sync from YouTube or add a video manually.</p>
-          <a routerLink="/videos" class="btn btn-primary">Manage Videos</a>
+          <div class="empty-icon" aria-hidden="true">🎹</div>
+          <p>No videos yet. Add one by its YouTube ID and the optimizer can start work on it.</p>
+          <a routerLink="/videos" class="btn btn-primary">Add your first video</a>
         </div>
 
-        <div *ngFor="let video of recentVideos" class="video-row">
-          <img [src]="video.thumbnailUrl || 'https://placehold.co/80x45/1a1a2e/ffffff?text=🎹'"
-               [alt]="video.title" class="thumb">
+        <div *ngFor="let video of recentVideos; trackBy: trackVideo" class="video-row">
+          <img [src]="video.thumbnailUrl || placeholder"
+               [alt]="'Thumbnail for ' + video.title" class="thumb">
           <div class="video-info">
             <a [routerLink]="['/videos', video.youTubeVideoId]" class="video-title">{{video.title}}</a>
             <div class="video-meta">
-              <span>👁 {{video.viewCount | number}}</span>
-              <span>👍 {{video.likeCount | number}}</span>
-              <span>💬 {{video.commentCount | number}}</span>
+              <span><span aria-hidden="true">👁</span> {{video.viewCount | number}} views</span>
+              <span><span aria-hidden="true">👍</span> {{video.likeCount | number}} likes</span>
+              <span><span aria-hidden="true">💬</span> {{video.commentCount | number}} comments</span>
             </div>
           </div>
           <div class="video-actions">
-            <a [routerLink]="['/videos', video.youTubeVideoId, 'optimize']" class="btn btn-primary btn-sm">Optimize</a>
+            <a [routerLink]="['/videos', video.youTubeVideoId, 'optimize']" class="btn btn-primary btn-sm"
+               [attr.aria-label]="'Optimize ' + video.title">Optimize</a>
           </div>
         </div>
       </div>
@@ -101,50 +109,55 @@ import { YouTubeService, YouTubeChannelDto } from '../../services/youtube.servic
 
     <!-- Quick Actions -->
     <div class="card">
-      <h3 style="margin-bottom:1rem;">⚡ Quick Actions</h3>
-      <div style="display:flex;gap:1rem;flex-wrap:wrap;">
-        <a routerLink="/videos" class="btn btn-primary">📹 View Videos</a>
-        <a routerLink="/videos/mock_video_001/optimize" class="btn btn-secondary">🤖 Try Optimizer</a>
-        <a routerLink="/videos/mock_video_001/analytics" class="btn btn-secondary">📊 View Analytics</a>
+      <h2 class="card-title">⚡ Quick actions</h2>
+      <div class="toolbar">
+        <a routerLink="/videos" class="btn btn-primary">📹 View videos</a>
+        <!-- These only appear once there is a real video to point them at;
+             previously they linked to a hardcoded mock id that may not exist. -->
+        <a *ngIf="firstVideoId" [routerLink]="['/videos', firstVideoId, 'optimize']" class="btn btn-secondary">
+          🤖 Optimize “{{firstVideoTitle}}”
+        </a>
+        <a *ngIf="firstVideoId" [routerLink]="['/videos', firstVideoId, 'analytics']" class="btn btn-secondary">
+          📊 View analytics
+        </a>
         <a routerLink="/settings" class="btn btn-secondary">⚙️ Settings</a>
       </div>
     </div>
   `,
   styles: [`
+    .card-title { font-size: 1.15rem; }
+    .channel-card, .recent-card { margin-bottom: 1.5rem; }
+    .channel-card .card-title { margin-bottom: 1rem; }
+    .channel-row { display: flex; align-items: center; gap: 1rem; flex-wrap: wrap; }
+    .channel-avatar { width: 56px; height: 56px; border-radius: 50%; object-fit: cover; background: #e6e6ee; }
+    .channel-name { font-weight: 600; font-size: 1.1rem; }
+    .channel-error { margin-bottom: 0; }
+    .section-head {
+      display: flex; justify-content: space-between; align-items: center;
+      gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap;
+    }
+    .section-head .card-title { margin-bottom: 0; }
     .video-row {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      padding: 0.75rem 0;
-      border-bottom: 1px solid #f0f2f5;
-      &:last-child { border-bottom: none; }
+      display: flex; align-items: center; gap: 1rem;
+      padding: 0.75rem 0; border-bottom: 1px solid #f0f2f5;
     }
-    .thumb {
-      width: 80px;
-      height: 45px;
-      object-fit: cover;
-      border-radius: 6px;
-      flex-shrink: 0;
-    }
+    .video-row:last-child { border-bottom: none; }
+    .thumb { width: 80px; height: 45px; object-fit: cover; border-radius: 6px; flex-shrink: 0; background: #e6e6ee; }
     .video-info { flex: 1; min-width: 0; }
     .video-title {
-      font-weight: 500;
-      color: #1a1a2e;
-      text-decoration: none;
-      display: block;
-      white-space: nowrap;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      &:hover { color: #6c63ff; }
+      font-weight: 500; color: #1a1a2e; text-decoration: none; display: block;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     }
+    .video-title:hover { color: #4338ca; text-decoration: underline; }
     .video-meta {
-      font-size: 0.8rem;
-      color: #888;
-      margin-top: 0.25rem;
-      display: flex;
-      gap: 0.75rem;
+      font-size: 0.8rem; color: #62687a; margin-top: 0.25rem;
+      display: flex; gap: 0.75rem; flex-wrap: wrap;
     }
     .video-actions { flex-shrink: 0; }
+    @media (max-width: 560px) {
+      .video-row { flex-wrap: wrap; }
+      .video-actions { width: 100%; }
+    }
   `]
 })
 export class DashboardComponent implements OnInit {
@@ -153,23 +166,47 @@ export class DashboardComponent implements OnInit {
   loading = true;
   error = '';
   channelError = '';
+  readonly placeholder = 'https://placehold.co/160x90/1a1a2e/ffffff?text=Piano';
 
   get recentVideos() { return this.videos.slice(0, 5); }
   get totalViews() { return this.videos.reduce((s, v) => s + (v.viewCount || 0), 0); }
   get totalLikes() { return this.videos.reduce((s, v) => s + (v.likeCount || 0), 0); }
   get totalComments() { return this.videos.reduce((s, v) => s + (v.commentCount || 0), 0); }
+  get firstVideoId() { return this.videos[0]?.youTubeVideoId ?? ''; }
+  get firstVideoTitle() {
+    const t = this.videos[0]?.title ?? '';
+    return t.length > 28 ? `${t.slice(0, 28)}…` : t;
+  }
 
   constructor(private videoService: VideoService, private youtubeService: YouTubeService) {}
 
   ngOnInit(): void {
+    this.loadChannel();
+    this.loadVideos();
+  }
+
+  loadChannel(): void {
+    this.channelError = '';
     this.youtubeService.getChannel().subscribe({
       next: ch => this.channel = ch,
-      error: err => this.channelError = err.message
+      error: err => this.channelError = this.friendlyError(err, 'load your channel')
     });
+  }
 
+  loadVideos(): void {
+    this.loading = true;
+    this.error = '';
     this.videoService.getVideos().subscribe({
       next: vids => { this.videos = vids; this.loading = false; },
-      error: err => { this.error = err.message; this.loading = false; }
+      error: err => { this.error = this.friendlyError(err, 'load your videos'); this.loading = false; }
     });
+  }
+
+  trackVideo = (_: number, v: VideoDto) => v.youTubeVideoId;
+
+  private friendlyError(err: unknown, what: string): string {
+    const e = err as { status?: number; error?: { message?: string }; message?: string };
+    if (e?.status === 0) return `Could not ${what}. Cannot reach the API — is the backend running on http://localhost:5000?`;
+    return `Could not ${what}. ${e?.error?.message || e?.message || 'Something went wrong.'}`;
   }
 }

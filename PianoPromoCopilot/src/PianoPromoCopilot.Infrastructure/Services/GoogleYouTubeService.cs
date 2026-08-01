@@ -37,7 +37,7 @@ public class GoogleYouTubeService : IYouTubeService
         _httpClient.BaseAddress = new Uri(YouTubeApiBaseUrl);
     }
 
-    public async Task<YouTubeChannelDto> GetChannelAsync(CancellationToken cancellationToken = default)
+    public Task<YouTubeChannelDto> GetChannelAsync(CancellationToken cancellationToken = default)
     {
         // TODO: Implement Google OAuth token refresh before API calls
         // TODO: Call GET https://www.googleapis.com/youtube/v3/channels?part=snippet,statistics&mine=true
@@ -48,7 +48,7 @@ public class GoogleYouTubeService : IYouTubeService
             "Google YouTube API not yet configured. Set Features__UseMockYouTube=true in appsettings.");
     }
 
-    public async Task<IReadOnlyList<YouTubeVideoDto>> GetVideosAsync(CancellationToken cancellationToken = default)
+    public Task<IReadOnlyList<YouTubeVideoDto>> GetVideosAsync(CancellationToken cancellationToken = default)
     {
         // TODO: Get channel uploads playlist ID from channels API
         // TODO: Call GET https://www.googleapis.com/youtube/v3/playlistItems?part=snippet&playlistId={uploadsPlaylistId}
@@ -59,7 +59,7 @@ public class GoogleYouTubeService : IYouTubeService
             "Google YouTube API not yet configured. Set Features__UseMockYouTube=true in appsettings.");
     }
 
-    public async Task<YouTubeVideoDto?> GetVideoAsync(string videoId, CancellationToken cancellationToken = default)
+    public Task<YouTubeVideoDto?> GetVideoAsync(string videoId, CancellationToken cancellationToken = default)
     {
         // TODO: Call GET https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics,contentDetails&id={videoId}
         // TODO: Map response to YouTubeVideoDto
@@ -68,7 +68,7 @@ public class GoogleYouTubeService : IYouTubeService
             "Google YouTube API not yet configured. Set Features__UseMockYouTube=true in appsettings.");
     }
 
-    public async Task UpdateVideoMetadataAsync(
+    public Task UpdateVideoMetadataAsync(
         UpdateYouTubeVideoMetadataRequest request,
         CancellationToken cancellationToken = default)
     {

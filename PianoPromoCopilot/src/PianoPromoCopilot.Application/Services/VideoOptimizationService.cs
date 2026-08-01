@@ -92,6 +92,13 @@ public class VideoOptimizationService : IVideoOptimizationService
         {
             rawJson = await _llmService.GenerateAsync(SystemPrompt, userPrompt, cancellationToken);
         }
+        // A cancelled request is not an LLM failure. Falling back here would run the whole
+        // compliance-and-persist pipeline for a caller that has already gone away, and would then
+        // write suggestions nobody asked for.
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "LLM generation failed, using fallback mock");
@@ -117,13 +124,7 @@ public class VideoOptimizationService : IVideoOptimizationService
             allTexts.Add(shorts.Caption);
         }
 
-        allTexts.Add(response.SocialPosts.Instagram);
-        allTexts.Add(response.SocialPosts.TikTok);
-        allTexts.Add(response.SocialPosts.Facebook);
-        allTexts.Add(response.SocialPosts.Reddit);
-        allTexts.Add(response.SocialPosts.X);
-        allTexts.Add(response.SocialPosts.LinkedIn);
-        allTexts.Add(response.SocialPosts.EmailNewsletter);
+        allTexts.AddRange(SocialPostPlatforms.Enumerate(response.SocialPosts).Select(p => p.Text));
 
         response.Compliance = _complianceService.ReviewAll(allTexts.Where(t => !string.IsNullOrEmpty(t)));
 
@@ -173,7 +174,7 @@ public class VideoOptimizationService : IVideoOptimizationService
 
             await _dbContext.SaveChangesAsync(cancellationToken);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!cancellationToken.IsCancellationRequested)
         {
             _logger.LogError(ex, "Failed to record compliance review audit entry");
         }
@@ -469,30 +470,18 @@ public class VideoOptimizationService : IVideoOptimizationService
             });
         }
 
-        var socialPosts = new[]
+        // Same platform list the promotion drafts use, so a platform can never be saved as a
+        // suggestion but be missing from the drafts (or vice versa).
+        foreach (var (platform, text) in SocialPostPlatforms.EnumerateNonEmpty(response.SocialPosts))
         {
-            ("Instagram", response.SocialPosts.Instagram),
-            ("TikTok", response.SocialPosts.TikTok),
-            ("Facebook", response.SocialPosts.Facebook),
-            ("Reddit", response.SocialPosts.Reddit),
-            ("X", response.SocialPosts.X),
-            ("LinkedIn", response.SocialPosts.LinkedIn),
-            ("Email", response.SocialPosts.EmailNewsletter),
-        };
-
-        foreach (var (platform, text) in socialPosts)
-        {
-            if (!string.IsNullOrEmpty(text))
+            suggestions.Add(new VideoOptimizationSuggestion
             {
-                suggestions.Add(new VideoOptimizationSuggestion
-                {
-                    YouTubeVideoId = youtubeVideoId,
-                    SuggestionType = SuggestionType.SocialPost,
-                    SuggestionText = text,
-                    Platform = platform,
-                    CreatedAt = now
-                });
-            }
+                YouTubeVideoId = youtubeVideoId,
+                SuggestionType = SuggestionType.SocialPost,
+                SuggestionText = text,
+                Platform = platform,
+                CreatedAt = now
+            });
         }
 
         // Re-optimizing (and generating drafts, which optimizes internally) must not append a

@@ -13,6 +13,7 @@ namespace PianoPromoCopilot.Api.Controllers;
 public class YouTubeController : ControllerBase
 {
     private readonly IYouTubeService _youTubeService;
+    private readonly IYouTubeSyncService _syncService;
     private readonly IAppDbContext _dbContext;
     private readonly IComplianceReviewService _complianceService;
     private readonly IConfiguration _configuration;
@@ -20,12 +21,14 @@ public class YouTubeController : ControllerBase
 
     public YouTubeController(
         IYouTubeService youTubeService,
+        IYouTubeSyncService syncService,
         IAppDbContext dbContext,
         IComplianceReviewService complianceService,
         IConfiguration configuration,
         ILogger<YouTubeController> logger)
     {
         _youTubeService = youTubeService;
+        _syncService = syncService;
         _dbContext = dbContext;
         _complianceService = complianceService;
         _configuration = configuration;
@@ -49,44 +52,7 @@ public class YouTubeController : ControllerBase
     [ProducesResponseType(typeof(IEnumerable<YouTubeVideoDto>), 200)]
     public async Task<IActionResult> GetVideos(CancellationToken cancellationToken)
     {
-        var videos = await _youTubeService.GetVideosAsync(cancellationToken);
-
-        // Upsert into local database
-        foreach (var video in videos)
-        {
-            var existing = await _dbContext.YouTubeVideos
-                .FirstOrDefaultAsync(v => v.YouTubeVideoId == video.VideoId, cancellationToken);
-
-            if (existing == null)
-            {
-                var newVideo = new YouTubeVideo
-                {
-                    YouTubeVideoId = video.VideoId,
-                    Title = video.Title,
-                    Description = video.Description,
-                    PublishedAt = video.PublishedAt,
-                    ThumbnailUrl = video.ThumbnailUrl,
-                    DurationIso8601 = video.DurationIso8601,
-                    PrivacyStatus = video.PrivacyStatus,
-                    ViewCount = video.ViewCount,
-                    LikeCount = video.LikeCount,
-                    CommentCount = video.CommentCount,
-                    CreatedAt = DateTime.UtcNow
-                };
-                await _dbContext.YouTubeVideos.AddAsync(newVideo, cancellationToken);
-            }
-            else
-            {
-                existing.Title = video.Title;
-                existing.ViewCount = video.ViewCount;
-                existing.LikeCount = video.LikeCount;
-                existing.CommentCount = video.CommentCount;
-                existing.UpdatedAt = DateTime.UtcNow;
-            }
-        }
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
+        var videos = await _syncService.SyncVideosAsync(cancellationToken);
         return Ok(videos);
     }
 
@@ -102,66 +68,13 @@ public class YouTubeController : ControllerBase
 
         _logger.LogInformation("YouTube sync requested. Mock mode: {MockMode}", useMock);
 
-        // Sync channel
-        var channel = await _youTubeService.GetChannelAsync(cancellationToken);
-
-        // Upsert channel
-        var existingChannel = await _dbContext.YouTubeChannels
-            .FirstOrDefaultAsync(c => c.ChannelId == channel.ChannelId, cancellationToken);
-
-        if (existingChannel == null)
-        {
-            await _dbContext.YouTubeChannels.AddAsync(new YouTubeChannel
-            {
-                ChannelId = channel.ChannelId,
-                ChannelTitle = channel.ChannelTitle,
-                Description = channel.Description,
-                ThumbnailUrl = channel.ThumbnailUrl,
-                IsConnected = channel.IsConnected,
-                CreatedAt = DateTime.UtcNow
-            }, cancellationToken);
-        }
-
-        // Sync videos
-        var videos = await _youTubeService.GetVideosAsync(cancellationToken);
-        foreach (var video in videos)
-        {
-            var existing = await _dbContext.YouTubeVideos
-                .FirstOrDefaultAsync(v => v.YouTubeVideoId == video.VideoId, cancellationToken);
-
-            if (existing == null)
-            {
-                await _dbContext.YouTubeVideos.AddAsync(new YouTubeVideo
-                {
-                    YouTubeVideoId = video.VideoId,
-                    Title = video.Title,
-                    Description = video.Description,
-                    PublishedAt = video.PublishedAt,
-                    ThumbnailUrl = video.ThumbnailUrl,
-                    DurationIso8601 = video.DurationIso8601,
-                    PrivacyStatus = video.PrivacyStatus,
-                    ViewCount = video.ViewCount,
-                    LikeCount = video.LikeCount,
-                    CommentCount = video.CommentCount,
-                    CreatedAt = DateTime.UtcNow
-                }, cancellationToken);
-            }
-            else
-            {
-                existing.ViewCount = video.ViewCount;
-                existing.LikeCount = video.LikeCount;
-                existing.CommentCount = video.CommentCount;
-                existing.UpdatedAt = DateTime.UtcNow;
-            }
-        }
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        var result = await _syncService.SyncChannelAndVideosAsync(cancellationToken);
 
         return Ok(new
         {
             message = "Sync completed",
-            channelSynced = channel.ChannelTitle,
-            videosSynced = videos.Count,
+            channelSynced = result.ChannelTitle,
+            videosSynced = result.VideosSynced,
             mockMode = useMock
         });
     }

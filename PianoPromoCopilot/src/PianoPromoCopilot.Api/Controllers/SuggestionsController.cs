@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PianoPromoCopilot.Application.DTOs;
 using PianoPromoCopilot.Application.Interfaces;
+using PianoPromoCopilot.Application.Mapping;
 
 namespace PianoPromoCopilot.Api.Controllers;
 
@@ -26,18 +27,7 @@ public class SuggestionsController : ControllerBase
         var suggestions = await _dbContext.VideoOptimizationSuggestions
             .Where(s => s.YouTubeVideoId == youtubeVideoId)
             .OrderByDescending(s => s.CreatedAt)
-            .Select(s => new SuggestionDto
-            {
-                Id = s.Id,
-                YouTubeVideoId = s.YouTubeVideoId,
-                SuggestionType = s.SuggestionType,
-                Platform = s.Platform,
-                SuggestionText = s.SuggestionText,
-                Score = s.Score,
-                IsApproved = s.IsApproved,
-                IsRejected = s.IsRejected,
-                CreatedAt = s.CreatedAt
-            })
+            .Select(s => s.ToDto())
             .ToListAsync(cancellationToken);
 
         return Ok(suggestions);
@@ -47,46 +37,31 @@ public class SuggestionsController : ControllerBase
     [HttpPost("{suggestionId}/approve")]
     [ProducesResponseType(typeof(SuggestionDto), 200)]
     [ProducesResponseType(404)]
-    public async Task<IActionResult> ApproveSuggestion(
+    public Task<IActionResult> ApproveSuggestion(
         string youtubeVideoId,
         int suggestionId,
         CancellationToken cancellationToken)
-    {
-        var suggestion = await _dbContext.VideoOptimizationSuggestions
-            .FirstOrDefaultAsync(s => s.Id == suggestionId && s.YouTubeVideoId == youtubeVideoId, cancellationToken);
-
-        if (suggestion == null)
-            return NotFound(new { message = $"Suggestion {suggestionId} not found for video {youtubeVideoId}" });
-
-        suggestion.IsApproved = true;
-        suggestion.IsRejected = false;
-        suggestion.UpdatedAt = DateTime.UtcNow;
-
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation("Suggestion {SuggestionId} approved for video {VideoId}", suggestionId, youtubeVideoId);
-
-        return Ok(new SuggestionDto
-        {
-            Id = suggestion.Id,
-            YouTubeVideoId = suggestion.YouTubeVideoId,
-            SuggestionType = suggestion.SuggestionType,
-            Platform = suggestion.Platform,
-            SuggestionText = suggestion.SuggestionText,
-            Score = suggestion.Score,
-            IsApproved = suggestion.IsApproved,
-            IsRejected = suggestion.IsRejected,
-            CreatedAt = suggestion.CreatedAt
-        });
-    }
+        => SetReviewDecisionAsync(youtubeVideoId, suggestionId, approved: true, cancellationToken);
 
     /// <summary>Marks a suggestion as rejected.</summary>
     [HttpPost("{suggestionId}/reject")]
     [ProducesResponseType(typeof(SuggestionDto), 200)]
     [ProducesResponseType(404)]
-    public async Task<IActionResult> RejectSuggestion(
+    public Task<IActionResult> RejectSuggestion(
         string youtubeVideoId,
         int suggestionId,
+        CancellationToken cancellationToken)
+        => SetReviewDecisionAsync(youtubeVideoId, suggestionId, approved: false, cancellationToken);
+
+    /// <summary>
+    /// Approve and reject are the same operation with opposite flags. Sharing one implementation
+    /// keeps them from drifting - IsApproved and IsRejected must always be set as a pair, or a
+    /// suggestion can end up both approved and rejected.
+    /// </summary>
+    private async Task<IActionResult> SetReviewDecisionAsync(
+        string youtubeVideoId,
+        int suggestionId,
+        bool approved,
         CancellationToken cancellationToken)
     {
         var suggestion = await _dbContext.VideoOptimizationSuggestions
@@ -95,25 +70,16 @@ public class SuggestionsController : ControllerBase
         if (suggestion == null)
             return NotFound(new { message = $"Suggestion {suggestionId} not found for video {youtubeVideoId}" });
 
-        suggestion.IsApproved = false;
-        suggestion.IsRejected = true;
+        suggestion.IsApproved = approved;
+        suggestion.IsRejected = !approved;
         suggestion.UpdatedAt = DateTime.UtcNow;
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Suggestion {SuggestionId} rejected for video {VideoId}", suggestionId, youtubeVideoId);
+        _logger.LogInformation(
+            "Suggestion {SuggestionId} {Decision} for video {VideoId}",
+            suggestionId, approved ? "approved" : "rejected", youtubeVideoId);
 
-        return Ok(new SuggestionDto
-        {
-            Id = suggestion.Id,
-            YouTubeVideoId = suggestion.YouTubeVideoId,
-            SuggestionType = suggestion.SuggestionType,
-            Platform = suggestion.Platform,
-            SuggestionText = suggestion.SuggestionText,
-            Score = suggestion.Score,
-            IsApproved = suggestion.IsApproved,
-            IsRejected = suggestion.IsRejected,
-            CreatedAt = suggestion.CreatedAt
-        });
+        return Ok(suggestion.ToDto());
     }
 }

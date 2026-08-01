@@ -69,6 +69,8 @@ public static class DependencyInjection
         services.AddScoped<IComplianceReviewService, ComplianceReviewService>();
         services.AddScoped<IAnalyticsRecommendationService, AnalyticsRecommendationService>();
         services.AddScoped<IVideoOptimizationService, VideoOptimizationService>();
+        services.AddScoped<IPromotionDraftService, PromotionDraftService>();
+        services.AddScoped<IYouTubeSyncService, YouTubeSyncService>();
 
         return services;
     }

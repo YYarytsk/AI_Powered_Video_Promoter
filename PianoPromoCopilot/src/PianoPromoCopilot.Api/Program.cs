@@ -105,9 +105,19 @@ try
 
     await app.RunAsync();
 }
+catch (HostAbortedException)
+{
+    // Raised by the EF Core design-time tooling when it builds the host to read the model.
+    // It is a normal shutdown, not a failure, and the tooling expects it to propagate.
+    throw;
+}
 catch (Exception ex)
 {
     Log.Fatal(ex, "Application terminated unexpectedly");
+
+    // Without this the process exits 0 after a fatal startup error, so a bad connection string or
+    // a DI misconfiguration looks like a clean shutdown to anything supervising the API.
+    throw;
 }
 finally
 {

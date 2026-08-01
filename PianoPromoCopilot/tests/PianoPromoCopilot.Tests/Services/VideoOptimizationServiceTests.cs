@@ -96,6 +96,43 @@ public class VideoOptimizationServiceTests
     }
 
     [Fact]
+    public async Task OptimizeAsync_Cancelled_PropagatesInsteadOfFallingBack()
+    {
+        // A cancelled request is not an LLM failure. Treating it as one would run the whole
+        // compliance-and-persist pipeline - writing suggestions - for a caller that has gone away.
+        using var cts = new CancellationTokenSource();
+
+        var llmMock = new Mock<ILlmService>();
+        llmMock.Setup(x => x.GenerateAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Returns<string, string, CancellationToken>((_, _, ct) =>
+            {
+                cts.Cancel();
+                ct.ThrowIfCancellationRequested();
+                return Task.FromResult("{}");
+            });
+
+        var db = CreateInMemoryDbContext();
+        db.YouTubeVideos.Add(new PianoPromoCopilot.Domain.Entities.YouTubeVideo
+        {
+            YouTubeVideoId = "test_cancel_001",
+            Title = "Test Video",
+            CreatedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
+
+        var sut = CreateService(llmMock.Object, db);
+
+        var act = async () => await sut.OptimizeAsync(
+            new OptimizeVideoRequest { YouTubeVideoId = "test_cancel_001", Title = "Test Piano Piece" },
+            cts.Token);
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        db.VideoOptimizationSuggestions.Count(s => s.YouTubeVideoId == "test_cancel_001").Should().Be(0);
+        db.ComplianceReviews.Should().BeEmpty();
+    }
+
+    [Fact]
     public async Task OptimizeAsync_InvalidJson_UsesFallback()
     {
         // Arrange

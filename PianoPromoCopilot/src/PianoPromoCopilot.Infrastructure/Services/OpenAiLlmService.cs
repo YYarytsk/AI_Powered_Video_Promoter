@@ -57,17 +57,59 @@ public class OpenAiLlmService : ILlmService
         _logger.LogInformation("Calling OpenAI API with model {Model}", _model);
 
         var response = await _httpClient.PostAsync("chat/completions", content, cancellationToken);
-        response.EnsureSuccessStatusCode();
 
         var responseJson = await response.Content.ReadAsStringAsync(cancellationToken);
 
-        using var doc = JsonDocument.Parse(responseJson);
-        var messageContent = doc.RootElement
-            .GetProperty("choices")[0]
-            .GetProperty("message")
-            .GetProperty("content")
-            .GetString();
+        if (!response.IsSuccessStatusCode)
+        {
+            // EnsureSuccessStatusCode() discards the body, and the caller silently falls back to
+            // mock content on any exception - so an invalid key or an exhausted quota used to look
+            // exactly like a working install producing generic text. Keep the reason.
+            var detail = Truncate(responseJson, 500);
+            _logger.LogError(
+                "OpenAI request failed with {StatusCode} ({Reason}). Response: {Detail}",
+                (int)response.StatusCode, response.ReasonPhrase, detail);
 
-        return messageContent ?? throw new InvalidOperationException("LLM returned empty content");
+            throw new HttpRequestException(
+                $"OpenAI request failed with status {(int)response.StatusCode} {response.ReasonPhrase}: {detail}",
+                inner: null,
+                statusCode: response.StatusCode);
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(responseJson);
+
+            if (!doc.RootElement.TryGetProperty("choices", out var choices) ||
+                choices.ValueKind != JsonValueKind.Array ||
+                choices.GetArrayLength() == 0)
+            {
+                throw new InvalidOperationException(
+                    $"OpenAI response contained no choices. Response: {Truncate(responseJson, 500)}");
+            }
+
+            var messageContent = choices[0]
+                .GetProperty("message")
+                .GetProperty("content")
+                .GetString();
+
+            if (string.IsNullOrWhiteSpace(messageContent))
+            {
+                throw new InvalidOperationException("OpenAI returned empty content");
+            }
+
+            return messageContent;
+        }
+        catch (JsonException ex)
+        {
+            // A malformed envelope is a different failure from malformed generated JSON, and the
+            // caller cannot tell them apart from a bare JsonException.
+            throw new InvalidOperationException(
+                $"OpenAI returned a response that is not valid JSON: {Truncate(responseJson, 500)}", ex);
+        }
     }
+
+    private static string Truncate(string value, int max) =>
+        string.IsNullOrEmpty(value) ? "(empty)" :
+        value.Length <= max ? value : value[..max] + "...";
 }

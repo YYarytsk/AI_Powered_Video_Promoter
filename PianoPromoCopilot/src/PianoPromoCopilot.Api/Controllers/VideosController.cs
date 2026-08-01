@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PianoPromoCopilot.Application.DTOs;
 using PianoPromoCopilot.Application.Interfaces;
+using PianoPromoCopilot.Application.Mapping;
 using PianoPromoCopilot.Domain.Entities;
 
 namespace PianoPromoCopilot.Api.Controllers;
@@ -31,7 +32,7 @@ public class VideosController : ControllerBase
     {
         var videos = await _dbContext.YouTubeVideos
             .OrderByDescending(v => v.PublishedAt ?? v.CreatedAt)
-            .Select(v => MapToDto(v))
+            .Select(v => v.ToDto())
             .ToListAsync(cancellationToken);
 
         return Ok(videos);
@@ -49,7 +50,7 @@ public class VideosController : ControllerBase
         if (video == null)
             return NotFound(new { message = $"Video '{youtubeVideoId}' not found" });
 
-        return Ok(MapToDto(video));
+        return Ok(video.ToDto());
     }
 
     /// <summary>Creates a manual video record in the local database.</summary>
@@ -87,7 +88,7 @@ public class VideosController : ControllerBase
         await _dbContext.YouTubeVideos.AddAsync(video, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        return CreatedAtAction(nameof(GetVideo), new { youtubeVideoId = video.YouTubeVideoId }, MapToDto(video));
+        return CreatedAtAction(nameof(GetVideo), new { youtubeVideoId = video.YouTubeVideoId }, video.ToDto());
     }
 
     /// <summary>Updates manual metadata fields on a video.</summary>
@@ -115,7 +116,7 @@ public class VideosController : ControllerBase
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(MapToDto(video));
+        return Ok(video.ToDto());
     }
 
     /// <summary>
@@ -137,25 +138,4 @@ public class VideosController : ControllerBase
         var result = await _optimizationService.OptimizeAsync(request, cancellationToken);
         return Ok(result);
     }
-
-    private static VideoDto MapToDto(YouTubeVideo v) => new()
-    {
-        Id = v.Id,
-        YouTubeVideoId = v.YouTubeVideoId,
-        Title = v.Title,
-        Description = v.Description,
-        PublishedAt = v.PublishedAt,
-        ThumbnailUrl = v.ThumbnailUrl,
-        DurationIso8601 = v.DurationIso8601,
-        PrivacyStatus = v.PrivacyStatus,
-        ViewCount = v.ViewCount,
-        LikeCount = v.LikeCount,
-        CommentCount = v.CommentCount,
-        CompositionName = v.CompositionName,
-        Mood = v.Mood,
-        Style = v.Style,
-        TargetAudience = v.TargetAudience,
-        CreatedAt = v.CreatedAt,
-        UpdatedAt = v.UpdatedAt
-    };
 }

@@ -2,7 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PianoPromoCopilot.Application.DTOs;
 using PianoPromoCopilot.Application.Interfaces;
-using PianoPromoCopilot.Domain.Entities;
+using PianoPromoCopilot.Application.Mapping;
 using PianoPromoCopilot.Domain.Enums;
 
 namespace PianoPromoCopilot.Api.Controllers;
@@ -11,17 +11,14 @@ namespace PianoPromoCopilot.Api.Controllers;
 public class PromotionDraftsController : ControllerBase
 {
     private readonly IAppDbContext _dbContext;
-    private readonly IVideoOptimizationService _optimizationService;
-    private readonly ILogger<PromotionDraftsController> _logger;
+    private readonly IPromotionDraftService _promotionDraftService;
 
     public PromotionDraftsController(
         IAppDbContext dbContext,
-        IVideoOptimizationService optimizationService,
-        ILogger<PromotionDraftsController> logger)
+        IPromotionDraftService promotionDraftService)
     {
         _dbContext = dbContext;
-        _optimizationService = optimizationService;
-        _logger = logger;
+        _promotionDraftService = promotionDraftService;
     }
 
     /// <summary>Returns all promotion drafts for a video.</summary>
@@ -32,7 +29,7 @@ public class PromotionDraftsController : ControllerBase
         var drafts = await _dbContext.PromotionDrafts
             .Where(d => d.YouTubeVideoId == youtubeVideoId)
             .OrderByDescending(d => d.CreatedAt)
-            .Select(d => MapToDto(d))
+            .Select(d => d.ToDto())
             .ToListAsync(cancellationToken);
 
         return Ok(drafts);
@@ -48,39 +45,21 @@ public class PromotionDraftsController : ControllerBase
         [FromBody] GeneratePromotionDraftsRequest request,
         CancellationToken cancellationToken)
     {
-        var video = await _dbContext.YouTubeVideos
-            .FirstOrDefaultAsync(v => v.YouTubeVideoId == youtubeVideoId, cancellationToken);
+        var result = await _promotionDraftService.GenerateDraftsAsync(youtubeVideoId, cancellationToken);
 
-        if (video == null)
-            return NotFound(new { message = $"Video '{youtubeVideoId}' not found" });
-
-        // Use optimization service to generate promotion content
-        var optimizeRequest = new OptimizeVideoRequest
+        if (result.Outcome == GeneratePromotionDraftsOutcome.VideoNotFound)
         {
-            YouTubeVideoId = youtubeVideoId,
-            Title = video.Title,
-            Description = video.Description,
-            CompositionName = video.CompositionName,
-            Mood = video.Mood,
-            Style = video.Style,
-            TargetAudience = video.TargetAudience
-        };
-
-        var optimized = await _optimizationService.OptimizeAsync(optimizeRequest, cancellationToken);
-        var compliance = optimized.Compliance;
+            return NotFound(new { message = $"Video '{youtubeVideoId}' not found" });
+        }
 
         // Surface the compliance verdict to the client without changing the response body shape
+        var compliance = result.Compliance;
         Response.Headers["X-Compliance-Risk"] = compliance.RiskLevel;
         Response.Headers["X-Compliance-Safe"] = compliance.IsSafeToUse ? "true" : "false";
         Response.Headers["X-Compliance-Issue-Count"] = compliance.Issues.Length.ToString();
 
-        // Compliance review BEFORE any write - blocked content is never persisted as a draft
-        if (compliance.RiskLevel == RiskLevel.Blocked)
+        if (result.Outcome == GeneratePromotionDraftsOutcome.ComplianceBlocked)
         {
-            _logger.LogWarning(
-                "Compliance review blocked promotion draft generation for video {VideoId}. Risk {RiskLevel}, issues: {Issues}",
-                youtubeVideoId, compliance.RiskLevel, string.Join("; ", compliance.Issues));
-
             return UnprocessableEntity(new
             {
                 message = "Compliance review failed. No promotion drafts were saved.",
@@ -89,59 +68,7 @@ public class PromotionDraftsController : ControllerBase
             });
         }
 
-        var now = DateTime.UtcNow;
-
-        var platforms = new[]
-        {
-            ("Instagram", optimized.SocialPosts.Instagram),
-            ("TikTok", optimized.SocialPosts.TikTok),
-            ("Facebook", optimized.SocialPosts.Facebook),
-            ("Reddit", optimized.SocialPosts.Reddit),
-            ("X", optimized.SocialPosts.X),
-            ("LinkedIn", optimized.SocialPosts.LinkedIn),
-            ("Email", optimized.SocialPosts.EmailNewsletter),
-        };
-
-        var drafts = new List<PromotionDraft>();
-        foreach (var (platform, text) in platforms)
-        {
-            if (!string.IsNullOrWhiteSpace(text))
-            {
-                drafts.Add(new PromotionDraft
-                {
-                    YouTubeVideoId = youtubeVideoId,
-                    Platform = platform,
-                    DraftText = text,
-                    Status = PromotionStatus.Draft,
-                    CreatedAt = now
-                });
-            }
-        }
-
-        // Supersede the previous generation, but never discard a draft the user already acted on
-        var supersededDrafts = await _dbContext.PromotionDrafts
-            .Where(d => d.YouTubeVideoId == youtubeVideoId && d.Status == PromotionStatus.Draft)
-            .ToListAsync(cancellationToken);
-
-        if (supersededDrafts.Count > 0)
-        {
-            _dbContext.PromotionDrafts.RemoveRange(supersededDrafts);
-            _logger.LogInformation(
-                "Superseded {Count} untouched promotion drafts for video {VideoId}",
-                supersededDrafts.Count, youtubeVideoId);
-        }
-
-        await _dbContext.PromotionDrafts.AddRangeAsync(drafts, cancellationToken);
-        await _dbContext.SaveChangesAsync(cancellationToken);
-
-        _logger.LogInformation(
-            "Generated {Count} promotion drafts for video {VideoId} (compliance risk {RiskLevel})",
-            drafts.Count, youtubeVideoId, compliance.RiskLevel);
-
-        return CreatedAtAction(
-            nameof(GetDrafts),
-            new { youtubeVideoId },
-            drafts.Select(d => MapToDto(d)));
+        return CreatedAtAction(nameof(GetDrafts), new { youtubeVideoId }, result.Drafts);
     }
 
     /// <summary>Updates a promotion draft's text or status.</summary>
@@ -167,18 +94,6 @@ public class PromotionDraftsController : ControllerBase
 
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        return Ok(MapToDto(draft));
+        return Ok(draft.ToDto());
     }
-
-    private static PromotionDraftDto MapToDto(PromotionDraft d) => new()
-    {
-        Id = d.Id,
-        YouTubeVideoId = d.YouTubeVideoId,
-        Platform = d.Platform,
-        DraftText = d.DraftText,
-        Status = d.Status,
-        ScheduledFor = d.ScheduledFor,
-        PostedAt = d.PostedAt,
-        CreatedAt = d.CreatedAt
-    };
 }

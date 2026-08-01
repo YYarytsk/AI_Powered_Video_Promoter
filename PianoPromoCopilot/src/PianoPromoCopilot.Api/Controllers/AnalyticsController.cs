@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
 using PianoPromoCopilot.Application.DTOs;
 using PianoPromoCopilot.Application.Interfaces;
+using PianoPromoCopilot.Application.Mapping;
 using PianoPromoCopilot.Domain.Entities;
 
 namespace PianoPromoCopilot.Api.Controllers;
@@ -32,7 +33,7 @@ public class AnalyticsController : ControllerBase
         var snapshots = await _dbContext.VideoAnalyticsSnapshots
             .Where(s => s.YouTubeVideoId == youtubeVideoId)
             .OrderByDescending(s => s.SnapshotDate)
-            .Select(s => MapToDto(s))
+            .Select(s => s.ToDto())
             .ToListAsync(cancellationToken);
 
         return Ok(snapshots);
@@ -70,7 +71,7 @@ public class AnalyticsController : ControllerBase
 
         _logger.LogInformation("Created mock analytics snapshot for video {VideoId}", youtubeVideoId);
 
-        return CreatedAtAction(nameof(GetAnalytics), new { youtubeVideoId }, MapToDto(snapshot));
+        return CreatedAtAction(nameof(GetAnalytics), new { youtubeVideoId }, snapshot.ToDto());
     }
 
     /// <summary>Analyzes analytics snapshots and returns AI-powered recommendations.</summary>
@@ -81,30 +82,11 @@ public class AnalyticsController : ControllerBase
         var snapshots = await _dbContext.VideoAnalyticsSnapshots
             .Where(s => s.YouTubeVideoId == youtubeVideoId)
             .OrderBy(s => s.SnapshotDate)
-            .Select(s => MapToDto(s))
+            .Select(s => s.ToDto())
             .ToListAsync(cancellationToken);
 
         var recommendations = _recommendationService.GenerateRecommendations(snapshots);
 
         return Ok(recommendations);
     }
-
-    private static AnalyticsSnapshotDto MapToDto(VideoAnalyticsSnapshot s) => new()
-    {
-        Id = s.Id,
-        YouTubeVideoId = s.YouTubeVideoId,
-        SnapshotDate = s.SnapshotDate,
-        Views = s.Views,
-        Likes = s.Likes,
-        Comments = s.Comments,
-        SubscribersGained = s.SubscribersGained,
-        EstimatedMinutesWatched = s.EstimatedMinutesWatched,
-        AverageViewDurationSeconds = s.AverageViewDurationSeconds,
-        AverageViewPercentage = s.AverageViewPercentage,
-        Impressions = s.Impressions,
-        ImpressionClickThroughRate = s.ImpressionClickThroughRate,
-        TrafficSource = s.TrafficSource,
-        Country = s.Country,
-        CreatedAt = s.CreatedAt
-    };
 }
