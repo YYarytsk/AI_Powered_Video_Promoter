@@ -81,9 +81,34 @@ Response:
 
 | Method | Endpoint | Description |
 |--------|----------|-------------|
-| GET | `/api/videos/{youtubeVideoId}/suggestions` | List suggestions for a video |
+| GET | `/api/videos/{youtubeVideoId}/suggestions` | List suggestions for a video (newest first) |
 | POST | `/api/videos/{youtubeVideoId}/suggestions/{id}/approve` | Approve a suggestion |
 | POST | `/api/videos/{youtubeVideoId}/suggestions/{id}/reject` | Reject a suggestion |
+
+Approve/reject return the updated suggestion (`200`), or `404` if the suggestion does not
+belong to that video. They only record the human review decision (`isApproved` /
+`isRejected`) - nothing is published anywhere.
+
+Suggestion shape:
+```json
+{
+  "id": 1,
+  "youTubeVideoId": "mock_video_001",
+  "suggestionType": "Title",
+  "platform": "YouTube",
+  "suggestionText": "Moonlit Reverie - Peaceful Original Piano Composition",
+  "isApproved": false,
+  "isRejected": false,
+  "createdAt": "2026-01-01T00:00:00Z"
+}
+```
+
+`suggestionType` is one of `Title | Description | Tags | Hashtags | ThumbnailIdea |
+ShortsIdea | SocialPost | AnalyticsRecommendation`. For `SocialPost`, `platform` is the
+target platform (Instagram, TikTok, ...). Null fields (such as the unused `score`) are
+omitted from responses.
+
+This is the data behind the Angular suggestions review screen at `/videos/:id/suggestions`.
 
 ---
 
@@ -94,6 +119,10 @@ Response:
 | GET | `/api/videos/{youtubeVideoId}/promotion-drafts` | List drafts for a video |
 | POST | `/api/videos/{youtubeVideoId}/promotion-drafts` | Generate LLM drafts for all platforms |
 | PUT | `/api/promotion-drafts/{id}` | Update draft text or status |
+
+Draft generation runs a compliance review first and returns the verdict as response headers
+(`X-Compliance-Risk`, `X-Compliance-Safe`, `X-Compliance-Issue-Count`). If the risk level is
+`Blocked` it returns `422 Unprocessable Entity` and **no drafts are saved**.
 
 ### Status Values
 - `Draft` - Initial state, needs review
@@ -130,6 +159,21 @@ Response:
 - Real YouTube OAuth configured
 
 When `EnableYouTubeWriteActions=false` (default), returns `403 Forbidden`.
+
+When compliance review reports `isSafeToUse: false` - which covers both `High` and `Blocked`
+risk - the write is refused with `400 Bad Request` and the risk level plus issues are returned.
+
+Request body:
+```json
+{
+  "title": "optional",
+  "description": "optional",
+  "tags": ["tag1", "tag2"]
+}
+```
+
+This endpoint is only ever called by an explicit human action. Nothing in the app calls it
+automatically.
 
 ---
 

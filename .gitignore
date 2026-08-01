@@ -75,6 +75,9 @@ secrets.json
 # Docker
 .docker/
 
+# Build tooling packages (never belong in source control)
+*.deb
+
 # OS
 .DS_Store
 Thumbs.db

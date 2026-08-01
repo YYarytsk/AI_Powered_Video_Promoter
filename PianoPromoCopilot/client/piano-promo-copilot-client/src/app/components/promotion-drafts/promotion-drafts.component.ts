@@ -29,7 +29,10 @@ import { PromotionDraftService, PromotionDraftDto } from '../../services/promoti
     </div>
 
     <div *ngIf="loading" class="loading">Loading drafts...</div>
-    <div *ngIf="error" class="error-banner">{{error}}</div>
+    <div *ngIf="error" class="error-banner">
+      <span>{{error}}</span>
+      <button class="btn btn-icon btn-sm" title="Dismiss" (click)="error = ''">✕</button>
+    </div>
 
     <div *ngIf="!loading && drafts.length === 0 && !error" class="empty-state card">
       <div class="empty-icon">📢</div>
@@ -77,7 +80,10 @@ import { PromotionDraftService, PromotionDraftDto } from '../../services/promoti
       </div>
     </div>
   `,
-  styles: [`.draft-card { transition: box-shadow 0.2s; &:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); } }`]
+  styles: [`
+    .draft-card { transition: box-shadow 0.2s; &:hover { box-shadow: 0 4px 12px rgba(0,0,0,0.12); } }
+    .error-banner { display: flex; align-items: center; justify-content: space-between; gap: 1rem; }
+  `]
 })
 export class PromotionDraftsComponent implements OnInit {
   videoId = '';
@@ -109,9 +115,15 @@ export class PromotionDraftsComponent implements OnInit {
 
   generateDrafts(): void {
     this.generating = true;
+    this.error = '';
     this.draftService.generateDrafts(this.videoId).subscribe({
-      next: d => { this.drafts = [...d, ...this.drafts]; this.generating = false; },
-      error: err => { this.error = err.message; this.generating = false; }
+      // Regenerating supersedes the previous un-reviewed batch server-side, so reload
+      // rather than prepending — otherwise superseded drafts would linger in the list.
+      next: () => {
+        this.generating = false;
+        this.loadDrafts();
+      },
+      error: err => { this.error = this.actionFailed('generate drafts', err); this.generating = false; }
     });
   }
 
@@ -121,26 +133,41 @@ export class PromotionDraftsComponent implements OnInit {
   }
 
   saveEdit(draft: PromotionDraftDto): void {
+    this.error = '';
     this.draftService.updateDraft(draft.id, { draftText: this.editText }).subscribe({
       next: updated => {
         const idx = this.drafts.findIndex(d => d.id === draft.id);
         if (idx >= 0) this.drafts[idx] = updated;
         this.editingId = null;
-      }
+      },
+      // Leave the editor open so the typed text is not lost, and say what failed.
+      error: err => { this.error = this.actionFailed('save your edit', err); }
     });
   }
 
   updateStatus(draft: PromotionDraftDto, status: string): void {
+    this.error = '';
     this.draftService.updateDraft(draft.id, { status }).subscribe({
       next: updated => {
         const idx = this.drafts.findIndex(d => d.id === draft.id);
         if (idx >= 0) this.drafts[idx] = updated;
-      }
+      },
+      // The row is only rewritten from the server response, so a failure leaves
+      // the draft showing its last known (still correct) status.
+      error: err => { this.error = this.actionFailed(`mark this draft as ${this.statusLabel(status)}`, err); }
     });
+  }
+
+  private actionFailed(what: string, err: unknown): string {
+    const e = err as { status?: number; error?: { message?: string }; message?: string };
+    if (e?.status === 404) return `Could not ${what}: that draft no longer exists. Reload the page.`;
+    if (e?.status === 0) return `Could not ${what}. Cannot reach the API. Is the backend running on http://localhost:5000?`;
+    return `Could not ${what}. ${e?.error?.message || e?.message || 'Something went wrong.'}`;
   }
 
   copy(text: string): void { navigator.clipboard.writeText(text).catch(() => {}); }
   platformIcon(p: string): string { return this.platformIcons[p] || '📄'; }
+  statusLabel(s: string): string { return s === 'PostedManually' ? 'Posted' : s; }
   statusClass(s: string): string {
     const map: Record<string, string> = {
       Draft: 'badge-draft', Approved: 'badge-approved',

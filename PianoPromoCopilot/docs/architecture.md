@@ -60,10 +60,11 @@ All external integrations are behind feature flags:
 
 | Flag | Default | Description |
 |------|---------|-------------|
+| `Features:UseInMemoryDatabase` | `true` in `Development` | Use the EF Core in-memory provider instead of SQL Server (no Docker needed). `false` elsewhere, which requires `ConnectionStrings:DefaultConnection` |
 | `Features:UseMockYouTube` | `true` | Use mock YouTube service |
 | `Features:EnableYouTubeWriteActions` | `false` | Allow YouTube metadata updates |
-| `Features:UseMockAnalytics` | `true` | Use mock analytics |
-| `OpenAI:ApiKey` | empty | Use mock LLM when empty |
+| `Features:UseMockAnalytics` | `true` | **Reserved - not yet implemented.** Present in `appsettings*.json` but no code reads it; analytics are always seeded/mock today |
+| `OpenAI:ApiKey` | `your-openai-api-key-here` | Use mock LLM when empty or when the value starts with `your-` |
 
 ---
 
@@ -79,9 +80,10 @@ User Request → OptimizationService
               ComplianceReviewService.ReviewAll()
               (checks all generated text)
                      ↓
-              If Blocked/High → flag in response
+              If Blocked → nothing is saved, verdict returned
                      ↓
-              Save suggestions (with human review flags)
+              Otherwise save suggestions (with human review flags)
+              High/Medium are advisory: flagged in the response for the human
                      ↓
               Return response to user
 ```
@@ -155,13 +157,14 @@ IYouTubeService (interface)
 
 ```
 app.component (shell + nav)
-    ├── dashboard (stats + recent videos)
-    ├── video-list (table with actions)
-    ├── video-detail (metadata + stats)
-    ├── optimize-video (form + results)
-    ├── promotion-drafts (platform cards)
-    ├── analytics (snapshots + recommendations)
-    └── settings (feature flags status)
+    ├── dashboard (stats + recent videos)                    /dashboard
+    ├── video-list (table with actions)                      /videos
+    ├── video-detail (metadata + stats)                      /videos/:id
+    ├── optimize-video (form + results)                      /videos/:id/optimize
+    ├── suggestions (approve/reject saved suggestions)       /videos/:id/suggestions
+    ├── promotion-drafts (platform cards)                    /videos/:id/promotions
+    ├── analytics (snapshots + recommendations)              /videos/:id/analytics
+    └── settings (feature flags status)                      /settings
 
 Services (all injected via provideHttpClient):
     ├── ApiClientService (base HTTP)
@@ -171,6 +174,10 @@ Services (all injected via provideHttpClient):
     ├── AnalyticsService
     └── YouTubeService
 ```
+
+The `suggestions` screen is where human approve/reject happens: it lists the
+`VideoOptimizationSuggestion` records saved by an optimize run and calls the
+approve/reject endpoints. Approving only records the review - nothing is published.
 
 ---
 

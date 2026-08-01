@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using PianoPromoCopilot.Application.DTOs;
 using PianoPromoCopilot.Application.Interfaces;
 using PianoPromoCopilot.Domain.Enums;
@@ -18,9 +19,9 @@ public class ComplianceReviewService : IComplianceReviewService
         ("auto comment", RiskLevel.Blocked, "Automated commenting violates YouTube ToS"),
         ("auto-comment", RiskLevel.Blocked, "Automated commenting violates YouTube ToS"),
         ("comment bot", RiskLevel.Blocked, "Comment bots violate YouTube ToS"),
-        (" bot ", RiskLevel.High, "Bot references may indicate ToS violations"),
         ("fake subscribers", RiskLevel.Blocked, "Fake subscribers violate YouTube ToS"),
         ("fake views", RiskLevel.Blocked, "Fake views violate YouTube ToS"),
+        ("fake likes", RiskLevel.Blocked, "Fake likes violate YouTube ToS"),
         ("fake engagement", RiskLevel.Blocked, "Fake engagement violates YouTube ToS"),
         ("mass dm", RiskLevel.Blocked, "Mass DM spam violates platform ToS"),
         ("mass direct message", RiskLevel.Blocked, "Mass DM spam violates platform ToS"),
@@ -31,6 +32,17 @@ public class ComplianceReviewService : IComplianceReviewService
         ("best pianist in the world", RiskLevel.Medium, "Unverifiable superlative claim"),
         ("view exchange", RiskLevel.Blocked, "View exchange schemes violate YouTube ToS"),
         ("like exchange", RiskLevel.Blocked, "Like exchange schemes violate YouTube ToS"),
+    };
+
+    /// <summary>
+    /// Rules that need word-boundary matching instead of a plain substring scan.
+    /// </summary>
+    private static readonly (Regex Pattern, string RiskLevel, string Issue)[] WordRules = new[]
+    {
+        // Matches "bot"/"bots" as standalone words anywhere in the scanned text - including at
+        // the very start or end - without flagging "robot", "bottom", "sabotage" or "both".
+        (new Regex(@"\bbots?\b", RegexOptions.Compiled | RegexOptions.CultureInvariant),
+            RiskLevel.High, "Bot references may indicate ToS violations"),
     };
 
     public ComplianceSummaryDto Review(string text)
@@ -47,6 +59,19 @@ public class ComplianceReviewService : IComplianceReviewService
         foreach (var (pattern, riskLevel, issue) in Rules)
         {
             if (combinedText.Contains(pattern.ToLowerInvariant()))
+            {
+                if (!issues.Contains(issue))
+                {
+                    issues.Add(issue);
+                }
+
+                highestRisk = EscalateRisk(highestRisk, riskLevel);
+            }
+        }
+
+        foreach (var (pattern, riskLevel, issue) in WordRules)
+        {
+            if (pattern.IsMatch(combinedText))
             {
                 if (!issues.Contains(issue))
                 {

@@ -160,4 +160,43 @@ public class ComplianceReviewServiceTests
         result.RiskLevel.Should().Be(RiskLevel.High);
         result.IsSafeToUse.Should().BeFalse();
     }
+
+    [Fact]
+    public void Review_FakeLikes_ReturnsBlocked()
+    {
+        var result = _sut.Review("Get fake likes on every upload to boost the algorithm");
+
+        result.RiskLevel.Should().Be(RiskLevel.Blocked);
+        result.IsSafeToUse.Should().BeFalse();
+        result.Issues.Should().NotBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Use engagement bots to grow faster")]   // plural
+    [InlineData("bot")]                                  // whole text is the word
+    [InlineData("Set up a bot")]                         // end of text
+    [InlineData("Bots will inflate your numbers")]       // start of text, capitalised
+    public void Review_BotAsWholeWord_ReturnsHighRisk(string text)
+    {
+        // The old rule was the substring " bot " and so could not match at a field edge or a plural.
+        var result = _sut.Review(text);
+
+        result.RiskLevel.Should().Be(RiskLevel.High);
+        result.IsSafeToUse.Should().BeFalse();
+    }
+
+    [Theory]
+    [InlineData("A robot arm turns the pages of the score")]
+    [InlineData("Recorded from the bottom of the piano frame")]
+    [InlineData("Both hands play the theme in octaves")]
+    [InlineData("Nothing here would sabotage your channel")]
+    public void Review_WordsContainingBot_AreNotFlagged(string text)
+    {
+        // Word-boundary matching must not fire on robot / bottom / both / sabotage.
+        var result = _sut.Review(text);
+
+        result.RiskLevel.Should().Be(RiskLevel.Low);
+        result.IsSafeToUse.Should().BeTrue();
+        result.Issues.Should().BeEmpty();
+    }
 }

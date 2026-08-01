@@ -242,7 +242,8 @@ export class OptimizeVideoComponent implements OnInit {
     this.optimizationService.optimize(this.request).subscribe({
       next: res => {
         this.result = res;
-        this.savedToVideo = !!this.request.youTubeVideoId;
+        // Blocked content is deliberately not persisted by the API, so don't claim it was saved.
+        this.savedToVideo = !!this.request.youTubeVideoId && res.compliance?.riskLevel !== 'Blocked';
         this.loading = false;
       },
       error: err => { this.error = this.friendlyError(err); this.loading = false; }

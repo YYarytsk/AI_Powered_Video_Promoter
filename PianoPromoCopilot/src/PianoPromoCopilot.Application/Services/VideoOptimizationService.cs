@@ -100,11 +100,23 @@ public class VideoOptimizationService : IVideoOptimizationService
 
         var response = ParseLlmResponse(rawJson, request);
 
-        // Run compliance on all generated text
+        // Run compliance on all generated text - every field we persist or show must be checked
         var allTexts = new List<string>();
         allTexts.AddRange(response.Titles);
         allTexts.AddRange(response.Descriptions);
         allTexts.AddRange(response.Tags);
+        allTexts.AddRange(response.Hashtags);
+        allTexts.AddRange(response.ThumbnailIdeas);
+
+        foreach (var shorts in response.ShortsIdeas)
+        {
+            allTexts.Add(shorts.Title);
+            allTexts.Add(shorts.Hook);
+            allTexts.Add(shorts.SuggestedTimestamp);
+            allTexts.Add(shorts.Description);
+            allTexts.Add(shorts.Caption);
+        }
+
         allTexts.Add(response.SocialPosts.Instagram);
         allTexts.Add(response.SocialPosts.TikTok);
         allTexts.Add(response.SocialPosts.Facebook);
@@ -114,6 +126,18 @@ public class VideoOptimizationService : IVideoOptimizationService
         allTexts.Add(response.SocialPosts.EmailNewsletter);
 
         response.Compliance = _complianceService.ReviewAll(allTexts.Where(t => !string.IsNullOrEmpty(t)));
+
+        // Blocked content is never usable, so it must not be persisted or become approvable.
+        // The response still carries the verdict so the UI can explain why nothing was saved.
+        if (response.Compliance.RiskLevel == RiskLevel.Blocked)
+        {
+            _logger.LogWarning(
+                "Compliance blocked generated content for video {VideoId} - suggestions were not saved. Issues: {Issues}",
+                string.IsNullOrEmpty(request.YouTubeVideoId) ? "(none)" : request.YouTubeVideoId,
+                string.Join("; ", response.Compliance.Issues));
+
+            return response;
+        }
 
         // Save suggestions to database if we have a video ID
         if (!string.IsNullOrEmpty(request.YouTubeVideoId))
@@ -156,6 +180,14 @@ public class VideoOptimizationService : IVideoOptimizationService
 
     private OptimizeVideoResponse ParseLlmResponse(string rawJson, OptimizeVideoRequest request)
     {
+        return ParseLlmResponse(rawJson, request, isFallbackAttempt: false);
+    }
+
+    // isFallbackAttempt marks the single retry with GetFallbackJson. It makes recursion
+    // impossible: if the fallback itself fails to parse we return a minimal hard-coded
+    // response instead of calling back into the fallback path again.
+    private OptimizeVideoResponse ParseLlmResponse(string rawJson, OptimizeVideoRequest request, bool isFallbackAttempt)
+    {
         try
         {
             // Clean potential markdown code fences
@@ -164,7 +196,14 @@ public class VideoOptimizationService : IVideoOptimizationService
             {
                 var start = json.IndexOf('\n') + 1;
                 var end = json.LastIndexOf("```");
-                json = json[start..end].Trim();
+
+                // Only strip when the fence is actually terminated after the opening line.
+                // An unterminated fence would give end < start and throw out of the JsonException
+                // catch below, so leave the text as-is and let the normal parse + fallback handle it.
+                if (start > 0 && end >= start)
+                {
+                    json = json[start..end].Trim();
+                }
             }
 
             var options = new JsonSerializerOptions
@@ -176,7 +215,7 @@ public class VideoOptimizationService : IVideoOptimizationService
             if (parsed == null)
             {
                 _logger.LogWarning("LLM returned null after parse, using fallback");
-                return ParseLlmResponse(GetFallbackJson(request), request);
+                return UseFallback(request, isFallbackAttempt);
             }
 
             return new OptimizeVideoResponse
@@ -209,22 +248,61 @@ public class VideoOptimizationService : IVideoOptimizationService
         catch (JsonException ex)
         {
             _logger.LogError(ex, "Failed to parse LLM JSON response. Raw: {Raw}", rawJson[..Math.Min(500, rawJson.Length)]);
-            return ParseLlmResponse(GetFallbackJson(request), request);
+            return UseFallback(request, isFallbackAttempt);
         }
+    }
+
+    private OptimizeVideoResponse UseFallback(OptimizeVideoRequest request, bool isFallbackAttempt)
+    {
+        if (isFallbackAttempt)
+        {
+            _logger.LogError("Fallback JSON could not be parsed either, returning minimal response");
+            return GetMinimalResponse(request);
+        }
+
+        return ParseLlmResponse(GetFallbackJson(request), request, isFallbackAttempt: true);
+    }
+
+    // Last resort when even the fallback JSON fails to parse. Built in code rather than from
+    // JSON so it can never fail, and deliberately conservative and compliant.
+    private static OptimizeVideoResponse GetMinimalResponse(OptimizeVideoRequest request)
+    {
+        var composition = string.IsNullOrWhiteSpace(request.CompositionName)
+            ? request.Title
+            : request.CompositionName;
+
+        return new OptimizeVideoResponse
+        {
+            Titles = new[] { $"{composition} - Original Piano Composition" },
+            Descriptions = new[] { $"An original piano composition titled '{composition}'." },
+            Tags = new[] { "piano music", "original piano", "piano composition", "solo piano" },
+            Hashtags = new[] { "#piano", "#originalmusic", "#pianocomposition" },
+            ThumbnailIdeas = new[] { "Close-up shot of hands on piano keys with soft warm lighting" },
+            ShortsIdeas = Array.Empty<ShortsIdeaDto>(),
+            SocialPosts = new SocialPostsDto()
+        };
     }
 
     private static string GetFallbackJson(OptimizeVideoRequest request)
     {
         var title = request.Title;
-        var mood = request.Mood ?? "peaceful";
-        var composition = request.CompositionName ?? title;
-        var style = request.Style ?? "classical";
+        var rawMood = string.IsNullOrWhiteSpace(request.Mood) ? "peaceful" : request.Mood;
+        var rawComposition = request.CompositionName ?? title;
+        var rawStyle = request.Style ?? "classical";
+
+        // These values come from the user and are interpolated into JSON string literals, so
+        // they must be JSON-escaped - a single quote or backslash in a title would otherwise
+        // make the fallback itself unparseable.
+        var mood = JsonEncodedText.Encode(rawMood).ToString();
+        var moodCapitalized = JsonEncodedText.Encode(rawMood.First().ToString().ToUpper() + rawMood[1..]).ToString();
+        var composition = JsonEncodedText.Encode(rawComposition).ToString();
+        var style = JsonEncodedText.Encode(rawStyle).ToString();
 
         return $$"""
             {
               "titles": [
                 "{{composition}} - Original Piano Composition",
-                "{{mood.First().ToString().ToUpper() + mood[1..]}} {{style}} Piano - {{composition}}",
+                "{{moodCapitalized}} {{style}} Piano - {{composition}}",
                 "{{composition}} | Original Piano Music",
                 "Soothing Piano: {{composition}}",
                 "{{composition}} - Piano Piece by Independent Composer"
@@ -386,10 +464,32 @@ public class VideoOptimizationService : IVideoOptimizationService
             }
         }
 
-        await _dbContext.VideoOptimizationSuggestions.AddRangeAsync(suggestions, cancellationToken);
-        await _dbContext.SaveChangesAsync(cancellationToken);
+        // Re-optimizing (and generating drafts, which optimizes internally) must not append a
+        // second copy of content that is already stored. Existing rows are left untouched so the
+        // user's approve/reject decisions survive.
+        var existing = await _dbContext.VideoOptimizationSuggestions
+            .Where(s => s.YouTubeVideoId == youtubeVideoId)
+            .Select(s => new { s.SuggestionType, s.Platform, s.SuggestionText })
+            .ToListAsync(cancellationToken);
 
-        _logger.LogInformation("Saved {Count} suggestions for video {VideoId}", suggestions.Count, youtubeVideoId);
+        var seen = new HashSet<(string SuggestionType, string? Platform, string SuggestionText)>(
+            existing.Select(s => (s.SuggestionType, s.Platform, s.SuggestionText)));
+
+        // HashSet.Add returns false for anything already stored, and also collapses duplicates
+        // within this batch.
+        var newSuggestions = suggestions
+            .Where(s => seen.Add((s.SuggestionType, s.Platform, s.SuggestionText)))
+            .ToList();
+
+        if (newSuggestions.Count > 0)
+        {
+            await _dbContext.VideoOptimizationSuggestions.AddRangeAsync(newSuggestions, cancellationToken);
+            await _dbContext.SaveChangesAsync(cancellationToken);
+        }
+
+        _logger.LogInformation(
+            "Saved {Count} new suggestions for video {VideoId} ({Skipped} duplicates skipped)",
+            newSuggestions.Count, youtubeVideoId, suggestions.Count - newSuggestions.Count);
     }
 
     // Internal DTO for JSON deserialization from LLM

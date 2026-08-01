@@ -45,6 +45,12 @@ type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
     <div *ngIf="loading" class="loading">Loading suggestions...</div>
     <div *ngIf="error" class="error-banner">{{error}}</div>
 
+    <!-- Approve/reject failures must never hide the list the user is reviewing -->
+    <div *ngIf="actionError" class="error-banner action-error">
+      <span>{{actionError}}</span>
+      <button class="btn btn-icon btn-sm" title="Dismiss" (click)="actionError = ''">✕</button>
+    </div>
+
     <div *ngIf="!loading && !error">
       <!-- Summary + filters -->
       <div class="card" style="margin-bottom:1.5rem;" *ngIf="suggestions.length > 0">
@@ -135,6 +141,12 @@ type StatusFilter = 'all' | 'pending' | 'approved' | 'rejected';
     </div>
   `,
   styles: [`
+    .action-error {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+    }
     .suggestion-item {
       display: flex;
       align-items: flex-start;
@@ -161,7 +173,8 @@ export class SuggestionsComponent implements OnInit {
   videoId = '';
   suggestions: SuggestionDto[] = [];
   loading = true;
-  error = '';
+  error = '';          // load failures only - these hide the list
+  actionError = '';    // approve/reject failures - shown above the list
   filter: StatusFilter = 'all';
   busyIds = new Set<number>();
 
@@ -199,6 +212,8 @@ export class SuggestionsComponent implements OnInit {
 
   load(): void {
     this.loading = true;
+    this.error = '';
+    this.actionError = '';
     this.shortsCache.clear();
     this.optimizationService.getSuggestions(this.videoId).subscribe({
       next: s => { this.suggestions = s; this.loading = false; },
@@ -249,18 +264,20 @@ export class SuggestionsComponent implements OnInit {
   }
 
   approve(s: SuggestionDto): void {
+    this.actionError = '';
     this.busyIds.add(s.id);
     this.optimizationService.approveSuggestion(this.videoId, s.id).subscribe({
       next: updated => { this.replace(updated); this.busyIds.delete(s.id); },
-      error: err => { this.error = this.friendlyError(err); this.busyIds.delete(s.id); }
+      error: err => { this.actionError = this.actionFailed('approve', err); this.busyIds.delete(s.id); }
     });
   }
 
   reject(s: SuggestionDto): void {
+    this.actionError = '';
     this.busyIds.add(s.id);
     this.optimizationService.rejectSuggestion(this.videoId, s.id).subscribe({
       next: updated => { this.replace(updated); this.busyIds.delete(s.id); },
-      error: err => { this.error = this.friendlyError(err); this.busyIds.delete(s.id); }
+      error: err => { this.actionError = this.actionFailed('reject', err); this.busyIds.delete(s.id); }
     });
   }
 
@@ -323,5 +340,15 @@ export class SuggestionsComponent implements OnInit {
     if (e?.status === 404) return 'Video not found.';
     if (e?.status) return `Request failed (HTTP ${e.status}).`;
     return e?.message || 'Something went wrong.';
+  }
+
+  // Same wording rules as friendlyError, but a 404 here means the suggestion is gone,
+  // not the video - and the list stays on screen so we say what failed.
+  private actionFailed(action: 'approve' | 'reject', err: unknown): string {
+    const e = err as { status?: number; error?: { message?: string }; message?: string };
+    if (e?.status === 404) {
+      return `Could not ${action}: that suggestion no longer exists. Reload the page.`;
+    }
+    return `Could not ${action} the suggestion. ${this.friendlyError(err)}`;
   }
 }

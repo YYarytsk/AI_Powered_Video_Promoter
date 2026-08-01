@@ -23,8 +23,17 @@ public static class DependencyInjection
         }
         else
         {
-            var connectionString = configuration.GetConnectionString("DefaultConnection")
-                ?? "Server=localhost,1433;Database=PianoPromoCopilot;User Id=sa;Password=PianoPromo@2024;TrustServerCertificate=True;";
+            // Fail fast rather than silently falling back to a hardcoded localhost server -
+            // a misspelled env var must not quietly point at the wrong database.
+            var connectionString = configuration.GetConnectionString("DefaultConnection");
+            if (string.IsNullOrWhiteSpace(connectionString))
+            {
+                throw new InvalidOperationException(
+                    "No database connection string configured. Set 'ConnectionStrings:DefaultConnection' " +
+                    "(env var ConnectionStrings__DefaultConnection), or set 'Features:UseInMemoryDatabase' " +
+                    "to true to run without a database.");
+            }
+
             services.AddDbContext<AppDbContext>(options =>
                 options.UseSqlServer(connectionString));
         }
@@ -40,8 +49,8 @@ public static class DependencyInjection
         }
         else
         {
-            services.AddHttpClient<OpenAiLlmService>();
-            services.AddScoped<ILlmService, OpenAiLlmService>();
+            // Typed client bound to the interface so the HttpClient is injected by the factory.
+            services.AddHttpClient<ILlmService, OpenAiLlmService>();
         }
 
         // YouTube Service - use mock by default
@@ -52,8 +61,8 @@ public static class DependencyInjection
         }
         else
         {
-            services.AddHttpClient<GoogleYouTubeService>();
-            services.AddScoped<IYouTubeService, GoogleYouTubeService>();
+            // Typed client bound to the interface so the HttpClient is injected by the factory.
+            services.AddHttpClient<IYouTubeService, GoogleYouTubeService>();
         }
 
         // Application Services

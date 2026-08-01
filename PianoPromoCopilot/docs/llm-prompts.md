@@ -91,7 +91,14 @@ All content must be authentic, accurate to the video, and compliant with YouTube
 
 ## Compliance Rules
 
-The ComplianceReviewService applies the following pattern-based rules to all generated content:
+`ComplianceReviewService` lowercases all generated text, joins it into one string, and scans
+it for the patterns below. The highest matching risk level wins.
+
+> **`src/PianoPromoCopilot.Application/Services/ComplianceReviewService.cs` is the source of
+> truth for this rule set.** The table is a summary and may lag behind the code as rules are
+> added - check the file if the exact list matters.
+
+### Substring rules
 
 | Pattern | Risk Level | Reason |
 |---------|-----------|--------|
@@ -103,12 +110,14 @@ The ComplianceReviewService applies the following pattern-based rules to all gen
 | `sub for sub` | Blocked | YouTube ToS violation |
 | `sub4sub` | Blocked | YouTube ToS violation |
 | `auto comment` | Blocked | YouTube ToS violation |
+| `auto-comment` | Blocked | YouTube ToS violation |
 | `comment bot` | Blocked | YouTube ToS violation |
-| ` bot ` | High | ToS risk |
 | `fake subscribers` | Blocked | YouTube ToS violation |
 | `fake views` | Blocked | YouTube ToS violation |
+| `fake likes` | Blocked | YouTube ToS violation |
 | `fake engagement` | Blocked | YouTube ToS violation |
 | `mass dm` | Blocked | Platform ToS violation |
+| `mass direct message` | Blocked | Platform ToS violation |
 | `spam` | High | Platform ToS violation |
 | `world's best pianist` | Medium | Unverifiable superlative |
 | `world's greatest pianist` | Medium | Unverifiable superlative |
@@ -117,6 +126,14 @@ The ComplianceReviewService applies the following pattern-based rules to all gen
 | `view exchange` | Blocked | YouTube ToS violation |
 | `like exchange` | Blocked | YouTube ToS violation |
 
+### Word-boundary rules
+
+Some words need boundary matching so ordinary words are not flagged.
+
+| Pattern | Risk Level | Reason |
+|---------|-----------|--------|
+| `\bbots?\b` | High | Bot references may indicate ToS violations. Matches `bot`/`bots` as standalone words without flagging "robot", "bottom", "sabotage" or "both" |
+
 ### Risk Level Definitions
 
 - **Low**: Content is safe to use after human review
@@ -124,12 +141,15 @@ The ComplianceReviewService applies the following pattern-based rules to all gen
 - **High**: Content contains potentially ToS-violating content - do not use without significant editing
 - **Blocked**: Content must not be used - contains clear ToS violations
 
+`IsSafeToUse` in the response is `false` for both **High** and **Blocked**.
+
 ---
 
 ## Mock LLM Service
 
-When `OpenAI__ApiKey` is not configured, `MockLlmService` returns a deterministic JSON response
-with generic piano music optimization content.
+When `OpenAI__ApiKey` is blank or still a placeholder starting with `your-` (the shipped
+default), `MockLlmService` returns a deterministic JSON response with generic piano music
+optimization content.
 
 The VideoOptimizationService also has a built-in fallback that generates video-specific mock
 content using the actual title, mood, and style fields from the request.

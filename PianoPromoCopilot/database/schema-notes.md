@@ -2,6 +2,10 @@
 
 ## Database: PianoPromoCopilot (SQL Server 2022)
 
+> In `Development` the app defaults to `Features:UseInMemoryDatabase=true`, so none of the
+> SQL Server steps below are needed to run it - the schema is created in memory with
+> `EnsureCreatedAsync()` and no migrations run. Set the flag to `false` to use SQL Server.
+
 ### Running SQL Server
 
 ```bash
@@ -19,7 +23,7 @@ cd src/PianoPromoCopilot.Api
 dotnet ef database update --project ../PianoPromoCopilot.Infrastructure
 ```
 
-Or run the API and it will auto-migrate on startup.
+Or run the API with `Features:UseInMemoryDatabase=false` and it will migrate on startup.
 
 ---
 
@@ -32,7 +36,7 @@ AppUser (1) ---< YouTubeChannel (1) ---< YouTubeVideo
                                               |--< PromotionDraft
                                               |--< VideoAnalyticsSnapshot
 
-ComplianceReview (standalone, references by SourceType/SourceId)
+ComplianceReview (standalone, references by SourceType/SourceId - reserved, no rows written yet)
 ```
 
 ---
@@ -75,20 +79,36 @@ Daily analytics data for a video.
 - Used by AnalyticsRecommendationService to generate growth tips
 
 ### ComplianceReview
-Audit log of compliance checks.
+**Reserved for the planned compliance audit-log feature - not yet written by any code path.**
+The table is mapped in `AppDbContext` and created by the initial migration, but no service
+inserts rows into it today. Compliance verdicts are currently computed per request by
+`ComplianceReviewService` and returned in the response (and as `X-Compliance-*` headers on
+promotion draft generation) rather than persisted.
+
+Planned shape:
 - `SourceType`: LlmSuggestion | PromotionDraft | MetadataUpdate
 - `RiskLevel`: Low | Medium | High | Blocked
-- `Blocked` status prevents use of the content
+- `Approved`: human review outcome
 
 ---
 
 ## Compliance Design
 
-The compliance system is intentionally conservative:
-- Any suggestion matching banned patterns is flagged
-- `Blocked` risk prevents the content from being usable
-- `High` risk requires explicit human override
-- All content requires human review before publication
+The compliance system is intentionally conservative. What it enforces today:
+
+- Any generated text matching a banned pattern is flagged, and the highest matching risk
+  level is returned with the response
+- `Blocked` stops persistence and generation:
+  - `VideoOptimizationService` returns the verdict but saves **no** `VideoOptimizationSuggestion`
+    rows
+  - `POST /api/videos/{id}/promotion-drafts` returns `422` and saves **no** `PromotionDraft` rows
+- `POST /api/youtube/videos/{id}/update-metadata` refuses the write with `400` whenever
+  `IsSafeToUse` is false - that is, for both `High` and `Blocked`. It is also gated behind
+  `Features:EnableYouTubeWriteActions` (`403` when disabled, which is the default)
+- `High` and `Medium` are otherwise **advisory signals**: the content is still saved and shown,
+  flagged for the human to review and edit. There is no override/unlock mechanism in code -
+  the human simply decides
+- All content requires human review before publication; nothing is ever posted automatically
 
 This ensures the system cannot be used for:
 - Fake view/like/subscriber schemes

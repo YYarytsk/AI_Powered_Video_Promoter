@@ -42,6 +42,7 @@ public class PromotionDraftsController : ControllerBase
     [HttpPost("api/videos/{youtubeVideoId}/promotion-drafts")]
     [ProducesResponseType(typeof(IEnumerable<PromotionDraftDto>), 201)]
     [ProducesResponseType(404)]
+    [ProducesResponseType(422)]
     public async Task<IActionResult> GenerateDrafts(
         string youtubeVideoId,
         [FromBody] GeneratePromotionDraftsRequest request,
@@ -66,6 +67,28 @@ public class PromotionDraftsController : ControllerBase
         };
 
         var optimized = await _optimizationService.OptimizeAsync(optimizeRequest, cancellationToken);
+        var compliance = optimized.Compliance;
+
+        // Surface the compliance verdict to the client without changing the response body shape
+        Response.Headers["X-Compliance-Risk"] = compliance.RiskLevel;
+        Response.Headers["X-Compliance-Safe"] = compliance.IsSafeToUse ? "true" : "false";
+        Response.Headers["X-Compliance-Issue-Count"] = compliance.Issues.Length.ToString();
+
+        // Compliance review BEFORE any write - blocked content is never persisted as a draft
+        if (compliance.RiskLevel == RiskLevel.Blocked)
+        {
+            _logger.LogWarning(
+                "Compliance review blocked promotion draft generation for video {VideoId}. Risk {RiskLevel}, issues: {Issues}",
+                youtubeVideoId, compliance.RiskLevel, string.Join("; ", compliance.Issues));
+
+            return UnprocessableEntity(new
+            {
+                message = "Compliance review failed. No promotion drafts were saved.",
+                riskLevel = compliance.RiskLevel,
+                issues = compliance.Issues
+            });
+        }
+
         var now = DateTime.UtcNow;
 
         var platforms = new[]
@@ -95,10 +118,25 @@ public class PromotionDraftsController : ControllerBase
             }
         }
 
+        // Supersede the previous generation, but never discard a draft the user already acted on
+        var supersededDrafts = await _dbContext.PromotionDrafts
+            .Where(d => d.YouTubeVideoId == youtubeVideoId && d.Status == PromotionStatus.Draft)
+            .ToListAsync(cancellationToken);
+
+        if (supersededDrafts.Count > 0)
+        {
+            _dbContext.PromotionDrafts.RemoveRange(supersededDrafts);
+            _logger.LogInformation(
+                "Superseded {Count} untouched promotion drafts for video {VideoId}",
+                supersededDrafts.Count, youtubeVideoId);
+        }
+
         await _dbContext.PromotionDrafts.AddRangeAsync(drafts, cancellationToken);
         await _dbContext.SaveChangesAsync(cancellationToken);
 
-        _logger.LogInformation("Generated {Count} promotion drafts for video {VideoId}", drafts.Count, youtubeVideoId);
+        _logger.LogInformation(
+            "Generated {Count} promotion drafts for video {VideoId} (compliance risk {RiskLevel})",
+            drafts.Count, youtubeVideoId, compliance.RiskLevel);
 
         return CreatedAtAction(
             nameof(GetDrafts),
